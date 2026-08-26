@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let menu = NSMenu()
     private var config = ConfigStore.load()
     private var snapshot: Snapshot?
+    private var sections: [SourceSection] = []
     private var refreshing = false
     private let demoMode: Bool
     private var demoGauges: [Gauge] = [
@@ -134,14 +135,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !demoMode {
             setTransient("…sync")
         }
-        let snap: Snapshot
         if demoMode {
-            snap = Snapshot(fetchedAt: Date(), rawJSON: "", gauges: demoGauges,
-                            errorMessage: nil, usedScheme: "")
-        } else {
-            snap = await ZaiSource.fetchSnapshot(config: config)
+            sections = [
+                SourceSection(title: "Demo data (--demo)", gauges: demoGauges),
+                SourceSection(title: "GitHub API · rate limit (demo)",
+                              gauges: [Gauge(id: "gh-core", label: "Core requests",
+                                             pct: 8, used: 5, total: 60,
+                                             resetAt: Date().addingTimeInterval(40 * 60))]),
+            ]
+            let snap = Snapshot(fetchedAt: Date(), rawJSON: "", gauges: demoGauges,
+                                errorMessage: nil, usedScheme: "")
+            applySnapshot(snap)
+            return
         }
-        applySnapshot(snap)
+
+        async let zaiSnap = ZaiSource.fetchSnapshot(config: config)
+        var built: [SourceSection] = []
+        let zai = await zaiSnap
+        let host = URL(string: config.baseURL)?.host ?? config.baseURL
+        let level = zai.planLevel.map { " (\($0))" } ?? ""
+        built.append(SourceSection(title: "Z.AI Coding Plan\(level) · \(host)",
+                                   gauges: zai.gauges,
+                                   errorMessage: zai.errorMessage))
+        if config.sources?.github?.enabled ?? true {
+            built.append(await GitHubSource.fetch(token: config.sources?.github?.token))
+        }
+        sections = built
+        applySnapshot(zai)
     }
 
     @MainActor private func applySnapshot(_ snap: Snapshot) {
@@ -259,22 +279,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.removeAllItems()
 
-        let subtitle: String
-        if demoMode { subtitle = "Demo data (--demo)" }
-        else {
-            let host = URL(string: config.baseURL)?.host ?? config.baseURL
-            let level = snapshot?.planLevel.map { " (\($0))" } ?? ""
-            subtitle = "Z.AI Coding Plan\(level) · \(host)"
+        if sections.isEmpty {
+            menu.addItem(disabledItem("No data yet"))
         }
-        menu.addItem(disabledItem(subtitle))
-
-        if let snap = snapshot {
-            if let message = snap.errorMessage {
+        for section in sections {
+            menu.addItem(disabledItem(section.title))
+            if let message = section.errorMessage {
                 menu.addItem(disabledItem("⚠︎ \(message)"))
-            } else if snap.gauges.isEmpty {
-                menu.addItem(disabledItem("Connected, but usage fields not recognized yet"))
+            } else if section.gauges.isEmpty {
+                menu.addItem(disabledItem("Waiting for data"))
             }
-            for gauge in snap.gauges {
+            for gauge in section.gauges {
                 let menuFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
                 let row = NSMutableAttributedString()
                 row.append(StatusText.run(gauge.label.pad(toWidth: 13) + "  ",
@@ -286,7 +301,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
                 var detail = ""
                 if let used = gauge.used, let total = gauge.total, total > 0 {
-                    detail = "\(compactCount(used)) / \(compactCount(total)) tokens"
+                    let unit = gauge.id.hasPrefix("gh") ? "requests" : "tokens"
+                    detail = "\(compactCount(used)) / \(compactCount(total)) \(unit)"
                 }
                 if let reset = resetText(gauge.resetAt) {
                     detail += detail.isEmpty ? "" : " · "
@@ -297,13 +313,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         StatusText.run("    \(detail)", color: .tertiaryLabelColor, font: menuFont)))
                 }
             }
+            menu.addItem(.separator())
+        }
+        if snapshot != nil {
             let updatedRow = disabledItem("Updated —")
             updatedRow.representedObject = "updated-row"
             menu.addItem(updatedRow)
-        } else {
-            menu.addItem(disabledItem("No data yet"))
         }
-        menu.addItem(.separator())
 
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshMenuItem(_:)), keyEquivalent: "r")
         refreshItem.target = self

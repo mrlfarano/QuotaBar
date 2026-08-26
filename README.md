@@ -16,6 +16,11 @@ Menu (click):
       34.8k / 60k tokens · Resets in 4d 3h
   MCP monthly     █░░░░░░░░░░░   3% used · 97% left
       139 / 4.0k tokens · Resets in 9d
+  ─────────────────────────────
+  GitHub API · rate limit
+  Core requests   █░░░░░░░░░░░   8% used · 92% left
+      5 / 60 requests · Resets in 40m
+  ─────────────────────────────
   Updated 18:02 (just now), poll 5m
   ─────────────────────────────
   Refresh Now           ⌘R
@@ -51,6 +56,32 @@ open build/BarStats.app             # menu bar app (accessory, no Dock icon)
 .build/release/barstats --probe     # fetch once, print parsed gauges + raw JSON
 .build/release/barstats --parse payload.json   # run the parser on a saved payload
 ```
+
+## Launch at login
+
+```sh
+scripts/install-login.sh     # build, copy app to ~/Applications, install LaunchAgent
+scripts/uninstall-login.sh   # remove the agent (app stays in ~/Applications)
+```
+
+The agent (`com.la.barstats`) starts the app at login with `RunAtLoad`;
+quitting the app keeps it quit until the next login.
+
+## Sources
+
+Each external source renders as its own menu section; the z.ai coding plan
+remains the only source driving the status bar and the snapshot cache.
+
+- **Z.AI Coding Plan** — primary; token via Set Token… (see below).
+- **GitHub API rate limit** — on by default, no credentials needed
+  (60/hr core budget; add a token in `~/.barstats/config.json` for 5000/hr):
+
+  ```json
+  { "sources": { "github": { "enabled": true, "token": "ghp_…" } } }
+  ```
+
+The source layer is generic (`SourceSection` = title + gauges + error);
+adding a third source is a fetch function plus a config flag.
 
 ## Credential setup
 

@@ -32,11 +32,23 @@ struct Snapshot: Codable {
 
 // MARK: - Config
 
+struct GitHubSourceConfig: Codable {
+    var enabled: Bool = true
+    var token: String = ""   // optional; raises 60/hr → 5000/hr core limit
+}
+
+struct SourcesConfig: Codable {
+    var github: GitHubSourceConfig? = GitHubSourceConfig()
+}
+
 struct BarStatsConfig: Codable {
     var zaiToken: String = ""
     var authScheme: String?
     var baseURL: String = "https://api.z.ai"
     var pollMinutes: Int = 5
+    // Optional so configs written before sources existed still decode
+    // (absent ⇒ defaults: GitHub on, no token).
+    var sources: SourcesConfig? = nil
 }
 
 func resolvedToken(config: BarStatsConfig) -> String {
