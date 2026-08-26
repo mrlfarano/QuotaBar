@@ -260,7 +260,11 @@ enum QuotaResponseParser {
     // MARK: tolerant leaf conversions
 
     private static func number(_ any: Any?) -> Double? {
-        if any is Bool { return nil }
+        guard let any else { return nil }
+        // `any is Bool` is true for NSNumber 0/1 too (bridging), which would
+        // discard legitimate percentage values of 1. Real JSON booleans are
+        // CFBoolean — a distinct CF type from CFNumber.
+        if CFGetTypeID(any as CFTypeRef) == CFBooleanGetTypeID() { return nil }
         if let double = any as? Double { return double }
         if let int = any as? Int { return Double(int) }
         if let string = any as? String {
@@ -351,7 +355,8 @@ enum QuotaParser {
     }
 
     private static func walk(_ node: Any, _ path: String, _ sink: (String, Double) -> Void) {
-        if node is Bool { return }
+        // See number(): skip only real JSON booleans, not numeric 0/1.
+        if CFGetTypeID(node as CFTypeRef) == CFBooleanGetTypeID() { return }
         switch node {
         case let dict as [String: Any]:
             for (key, child) in dict {

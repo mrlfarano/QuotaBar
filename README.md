@@ -5,20 +5,24 @@ information from external sources. First source: **Z.AI GLM Coding Plan**
 usage against the rolling **5-hour window** and the **weekly limit**.
 
 ```
-Status bar:  ▐█████████░░▌ 9h44m      ← battery bars floating in the bar:
-                ↑ 5h battery (fill=left, band color) + headline countdown
-                ▐████░░░▌ thinner weekly bar beneath (no text)
-              calm when green — percent appears in yellow/red
+Status bar:  [◉] 5h 76% left · 2h47m · wk 42% left
+             ring fill + % colored by band; ⚠︎ states on errors
 
-Click → popover panel (vibrancy):
+Menu (click):
   Z.AI Coding Plan (max) · api.z.ai
-  ◔ 5-hour window   98% left · Resets in 9h 44m
-  ◔ Weekly limit    100% left · Resets Aug 31
-  ◔ MCP monthly     97% left · 139 / 4.0k times used
-      search-prime · 134   web-reader · 5
-  Updated just now · poll 5m    [Refresh] [Raw JSON] [Token…] [Quit]
-
-Right-click → utility menu (Refresh ⌘R · Copy Raw · Set Token… · Quit ⌘Q)
+  5-hour window   █████░░░░░░░  24% used · 76% left
+      28.8k / 120k tokens · Resets in 2h 47m
+  Weekly limit    ███████░░░░░  58% used · 42% left
+      34.8k / 60k tokens · Resets in 4d 3h
+  MCP monthly     █░░░░░░░░░░░   3% used · 97% left
+      139 / 4.0k tokens · Resets in 9d
+  Updated 18:02 (just now), poll 5m
+  ─────────────────────────────
+  Refresh Now           ⌘R
+  Copy Raw Response
+  Set Token…
+  ─────────────────────────────
+  Quit barstats         ⌘Q
 ```
 
 ## Color bands
@@ -26,17 +30,16 @@ Right-click → utility menu (Refresh ⌘R · Copy Raw · Set Token… · Quit �
 Applied to quota **remaining** (battery metaphor — red means you're about to
 run out):
 
-| Remaining | Used | Color | Chip |
-|-----------|------|-------|------|
-| ≥ 76% | ≤ 24% | 🟢 green | 🟢 |
-| 26–75% | 25–74% | 🟡 yellow | 🟡 |
-| ≤ 25% | ≥ 75% | 🔴 red | 🔴 |
+| Remaining | Used | Color |
+|-----------|------|-------|
+| ≥ 76% | ≤ 24% | 🟢 green |
+| 26–75% | 25–74% | 🟡 yellow |
+| ≤ 25% | ≥ 75% | 🔴 red |
 
-The status item is two stacked battery-style meters (5h with a nub, weekly
-thinner beneath) drawn as one image, with an escalating text label: green
-shows only the reset countdown, yellow/red add the remaining percent in the
-band color. Click opens a popover with progress rings, per-second countdowns,
-per-model usage and footer actions; right-click opens the utility menu.
+The status-bar ring shows the 5-hour window's remaining fraction in its band
+color, followed by multi-color text (remaining %, reset countdown, weekly).
+Menu bars use the same banding. Thresholds live in
+`UsageBand.of(remainingPct:)` in `Sources/barstats/Visualization.swift`.
 
 ## Build & run
 

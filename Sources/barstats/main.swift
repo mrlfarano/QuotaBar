@@ -10,9 +10,12 @@ if CommandLine.arguments.contains("--parse"), let file = CommandLine.arguments.l
        let object = try? JSONSerialization.jsonObject(with: data),
        let root = object as? [String: Any] {
         let gauges = QuotaResponseParser.gauges(from: root)
+        func parseNum(_ value: Double) -> String {
+            value == value.rounded() ? String(Int(value)) : String(value)
+        }
         let lines = gauges.map { gauge -> String in
             var text = "\(gauge.id)=\(Int(gauge.pct.rounded()))%"
-            if let used = gauge.used, let total = gauge.total { text += " [\(used)/\(total)]" }
+            if let used = gauge.used, let total = gauge.total { text += " [\(parseNum(used))/\(parseNum(total))]" }
             if let reset = gauge.resetAt { text += " resets@\(Int(reset.timeIntervalSince1970))" }
             return text
         }
@@ -50,69 +53,39 @@ if CommandLine.arguments.contains("--probe") {
 
 // MARK: - App delegate / status item controller
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private var config = ConfigStore.load()
     private var snapshot: Snapshot?
     private var refreshing = false
-
-    private let popover: NSPopover = {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        return popover
-    }()
-    private let popoverController = PopoverController()
-    private var appearanceObservation: NSKeyValueObservation?
+    private let demoMode: Bool
     private var demoGauges: [Gauge] = [
-        Gauge(id: "fiveHour", label: "5-hour window", pct: 58, used: 69_600, total: 120_000,
-              resetAt: Date().addingTimeInterval(2 * 3600 + 47 * 60),
-              details: [DetailEntry(modelCode: "glm-5.3", usage: 41_000),
-                        DetailEntry(modelCode: "glm-5.3-flash", usage: 18_900),
-                        DetailEntry(modelCode: "glm-5.2", usage: 9_700)]),
-        Gauge(id: "week", label: "Weekly limit", pct: 85, used: 51_000, total: 60_000,
-              resetAt: Date().addingTimeInterval(4 * 86400 + 3 * 3600),
-              details: [DetailEntry(modelCode: "glm-5.3", usage: 30_100),
-                        DetailEntry(modelCode: "glm-5.3-flash", usage: 12_400),
-                        DetailEntry(modelCode: "glm-5.2", usage: 8_500)]),
+        Gauge(id: "fiveHour", label: "5-hour window", pct: 24, used: 28_800, total: 120_000,
+              resetAt: Date().addingTimeInterval(2 * 3600 + 47 * 60)),
+        Gauge(id: "week", label: "Weekly limit", pct: 58, used: 34_800, total: 60_000,
+              resetAt: Date().addingTimeInterval(4 * 86400 + 3 * 3600)),
         Gauge(id: "mcp", label: "MCP monthly", pct: 3, used: 139, total: 4_000,
-              resetAt: Date().addingTimeInterval(9 * 86400),
-              details: [DetailEntry(modelCode: "search-prime", usage: 134),
-                        DetailEntry(modelCode: "web-reader", usage: 5)]),
+              resetAt: Date().addingTimeInterval(9 * 86400)),
     ]
 
     init(demoMode: Bool) {
         self.demoMode = demoMode
     }
-    private let demoMode: Bool
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Created here so the accessory activation policy is already applied;
         // items created before it can fail to register with the system.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.imagePosition = .imageLeft
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(statusItemClicked(_:))
-        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        if ProcessInfo.processInfo.environment["BARSTATS_DEBUG"] != nil {
-            NSLog("barstats launched, button=%@", String(describing: statusItem.button))
-        }
-        buildUtilityMenu()
+        statusItem.button?.title = "barstats…"
+        menu.delegate = self
+        statusItem.menu = menu
         loadCachedSnapshot()
         rebuild(reason: "launch")
         Task { @MainActor in await refreshNow() }
         Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             self?.pollTick()
-        }
-        // Redraw the drawn bars when the system appearance flips.
-        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.rebuild(reason: "appearance") }
-        }
-        if CommandLine.arguments.contains("--autopen") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.showPopover()
-            }
         }
     }
 
@@ -163,7 +136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         let snap: Snapshot
         if demoMode {
-            snap = Snapshot(fetchedAt: Date(), rawJSON: "", gauges: demoGauges, errorMessage: nil, usedScheme: "")
+            snap = Snapshot(fetchedAt: Date(), rawJSON: "", gauges: demoGauges,
+                            errorMessage: nil, usedScheme: "")
         } else {
             snap = await ZaiSource.fetchSnapshot(config: config)
         }
@@ -203,13 +177,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     // MARK: rendering
 
-    /// Battery bars + escalation text. Green shows just the reset countdown;
-    /// yellow/red add the remaining percent in the band color.
+    /// Paint the status item: band-colored ring + multi-color text.
+    /// Always shows the 5h quota left and its reset countdown; weekly follows.
     private func updateStatusItem() {
+        guard let button = statusItem.button else { return }
         if demoMode {
             if let snap = snapshot, let five = snap.gauges.first(where: { $0.id == "fiveHour" }) {
-                applyBars(five: five, week: snap.gauges.first(where: { $0.id == "week" }),
-                          all: snap.gauges, demo: true)
+                button.image = ringImage(fraction: five.remainingPct / 100, color: five.band.color)
+                button.attributedTitle = statusText(snap: snap, demo: true) ?? NSAttributedString()
             } else {
                 setTransient("Z·demo")
             }
@@ -221,23 +196,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                          ? "⚠︎ z.ai auth" : "⚠︎ z.ai")
             return
         }
-        guard let five = snap.gauges.first(where: { $0.id == "fiveHour" }) else {
+        if let text = statusText(snap: snap, demo: false) {
+            button.attributedTitle = text
+        } else {
             setTransient("z.ai")
-            return
         }
-        applyBars(five: five, week: snap.gauges.first(where: { $0.id == "week" }),
-                  all: snap.gauges, demo: false)
-    }
-
-    private func applyBars(five: Gauge, week: Gauge?, all: [Gauge], demo: Bool) {
-        guard let button = statusItem.button else { return }
-        button.image = batteryBarsImage(fiveRemaining: five.remainingPct / 100,
-                                        fiveBand: five.band,
-                                        weekRemaining: week?.remainingPct,
-                                        weekBand: week?.band)
-        button.attributedTitle = escalationTitle(for: five, demo: demo)
+        button.image = snap.gauges.first(where: { $0.id == "fiveHour" })
+            .map { ringImage(fraction: $0.remainingPct / 100, color: $0.band.color) }
         var tip = "Z.AI Coding Plan"
-        for gauge in all {
+        for gauge in snap.gauges {
             tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used"
             if let used = gauge.used, let total = gauge.total {
                 tip += " (\(compactCount(used))/\(compactCount(total)) tokens)"
@@ -247,29 +214,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.toolTip = tip
     }
 
-    /// Escalating text next to the bars: calm when green, numbers when it matters.
-    private func escalationTitle(for five: Gauge, demo: Bool) -> NSAttributedString {
+    private func statusText(snap: Snapshot, demo: Bool) -> NSAttributedString? {
         let composed = NSMutableAttributedString()
-        let remaining = Int(five.remainingPct.rounded())
-        let short = shortReset(five.resetAt)
-        switch five.band {
-        case .green:
-            let text = short ?? "\(remaining)%"
-            composed.append(StatusText.run(text, color: .secondaryLabelColor))
-        case .yellow, .red:
-            composed.append(StatusText.run("\(remaining)%", color: five.band.color,
-                                           font: StatusText.emphasis))
-            if let short {
-                composed.append(StatusText.run(" · \(short)", color: .secondaryLabelColor))
-            }
+        guard let five = snap.gauges.first(where: { $0.id == "fiveHour" }) else {
+            guard let week = snap.gauges.first(where: { $0.id == "week" }) else { return nil }
+            composed.append(StatusText.run("wk ", color: .secondaryLabelColor))
+            composed.append(StatusText.run("\(Int(week.remainingPct.rounded()))% left",
+                                           color: week.band.color, font: StatusText.emphasis))
+            return composed
+        }
+        composed.append(StatusText.run("5h ", color: .secondaryLabelColor))
+        composed.append(StatusText.run("\(Int(five.remainingPct.rounded()))% left",
+                                       color: five.band.color, font: StatusText.emphasis))
+        if let short = shortReset(five.resetAt) {
+            composed.append(StatusText.run(" · \(short)", color: .tertiaryLabelColor))
+        }
+        if let week = snap.gauges.first(where: { $0.id == "week" }) {
+            composed.append(StatusText.run(" · wk ", color: .secondaryLabelColor))
+            composed.append(StatusText.run("\(Int(week.remainingPct.rounded()))% left",
+                                           color: week.band.color))
         }
         if demo {
-            composed.append(StatusText.run(" demo", color: .tertiaryLabelColor))
+            composed.append(StatusText.run(" (demo)", color: .quaternaryLabelColor))
         }
         return composed
     }
 
-    /// Plain text for transient/error states.
+    /// Plain gray text for transient/error states.
     private func setTransient(_ text: String) {
         guard let button = statusItem.button else { return }
         button.image = nil
@@ -279,72 +250,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             attributes: [.font: StatusText.base, .foregroundColor: NSColor.secondaryLabelColor])
     }
 
+    // MARK: menu
+
+    /// Recompute every menu row from current state. Called on updates; the
+    /// menu is closed whenever this runs, so rebuilding from scratch is safe.
     private func rebuild(reason: String) {
         updateStatusItem()
-        if popover.isShown {
-            popoverController.present(snapshot: snapshot, config: config, target: self,
-                                      actions: popoverActions)
-        }
-    }
 
-    // MARK: popover + utility menu
-
-    private var popoverActions: [(String, Selector)] {
-        [("Refresh", #selector(refreshMenuItem(_:))),
-         ("Raw JSON", #selector(copyRaw(_:)))]
-        + (demoMode ? [] : [("Token…", #selector(setToken(_:)))])
-        + [("Quit", #selector(NSApplication.terminate(_:)))]
-    }
-
-    private func buildUtilityMenu() {
         menu.removeAllItems()
+
+        let subtitle: String
+        if demoMode { subtitle = "Demo data (--demo)" }
+        else {
+            let host = URL(string: config.baseURL)?.host ?? config.baseURL
+            let level = snapshot?.planLevel.map { " (\($0))" } ?? ""
+            subtitle = "Z.AI Coding Plan\(level) · \(host)"
+        }
+        menu.addItem(disabledItem(subtitle))
+
+        if let snap = snapshot {
+            if let message = snap.errorMessage {
+                menu.addItem(disabledItem("⚠︎ \(message)"))
+            } else if snap.gauges.isEmpty {
+                menu.addItem(disabledItem("Connected, but usage fields not recognized yet"))
+            }
+            for gauge in snap.gauges {
+                let menuFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+                let row = NSMutableAttributedString()
+                row.append(StatusText.run(gauge.label.pad(toWidth: 13) + "  ",
+                                          color: .secondaryLabelColor, font: menuFont))
+                row.append(coloredBlocks(pct: gauge.pct, band: gauge.band))
+                row.append(StatusText.run("  \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left",
+                                          color: gauge.band.color, font: menuFont))
+                menu.addItem(attributedDisabledItem(row))
+
+                var detail = ""
+                if let used = gauge.used, let total = gauge.total, total > 0 {
+                    detail = "\(compactCount(used)) / \(compactCount(total)) tokens"
+                }
+                if let reset = resetText(gauge.resetAt) {
+                    detail += detail.isEmpty ? "" : " · "
+                    detail += reset
+                }
+                if !detail.isEmpty {
+                    menu.addItem(attributedDisabledItem(
+                        StatusText.run("    \(detail)", color: .tertiaryLabelColor, font: menuFont)))
+                }
+            }
+            let updatedRow = disabledItem("Updated —")
+            updatedRow.representedObject = "updated-row"
+            menu.addItem(updatedRow)
+        } else {
+            menu.addItem(disabledItem("No data yet"))
+        }
+        menu.addItem(.separator())
+
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshMenuItem(_:)), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
-        if !demoMode {
+
+        if !demoMode, snapshot?.rawJSON.isEmpty == false {
             let copy = NSMenuItem(title: "Copy Raw Response", action: #selector(copyRaw(_:)), keyEquivalent: "")
             copy.target = self
             menu.addItem(copy)
+        }
+
+        if !demoMode {
             let token = NSMenuItem(title: "Set Token…", action: #selector(setToken(_:)), keyEquivalent: "")
             token.target = self
             menu.addItem(token)
         }
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit barstats", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
-    private func showPopover() {
-        guard let button = statusItem.button else { return }
-        popover.contentViewController = popoverController
-        popover.delegate = self
-        popoverController.present(snapshot: snapshot, config: config, target: self,
-                                  actions: popoverActions)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    }
-
-    @objc private func statusItemClicked(_ sender: Any?) {
-        if NSApp.currentEvent?.type == .rightMouseUp {
-            if let button = statusItem.button {
-                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 6), in: button)
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        // Refresh only volatile text in place. Calling rebuild() here would
+        // removeAllItems() while the menu is tracking, which cancels the popup.
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        for item in menu.items where item.representedObject as? String == "updated-row" {
+            if let snap = snapshot {
+                let age = Int(Date().timeIntervalSince(snap.fetchedAt) / 60)
+                item.title = "Updated \(formatter.string(from: snap.fetchedAt)) (\(age <= 0 ? "just now" : "\(age)m ago")), poll \(config.pollMinutes)m"
+            } else {
+                item.title = "No data yet"
             }
-            return
-        }
-        if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            showPopover()
         }
     }
 
-    func popoverWillShow(_ notification: Notification) {
-        // Fresh data + fresh cards every time the panel opens.
-        popoverController.present(snapshot: snapshot, config: config, target: self,
-                                  actions: popoverActions)
+    private func attributedDisabledItem(_ attributed: NSAttributedString) -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.attributedTitle = attributed
+        item.isEnabled = false
+        return item
     }
 
-    func popoverDidClose(_ notification: Notification) {
-        popoverController.close()
+    private func disabledItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
     // MARK: actions

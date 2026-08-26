@@ -53,85 +53,51 @@ func shortReset(_ date: Date?) -> String? {
     return "\(minutes)m"
 }
 
-// MARK: - Status bar battery bars
-//
-// Two stacked battery-style meters floating directly in the menu bar (no
-// background pill): 5-hour window on top with a battery nub, weekly below,
-// thinner and slightly dimmed. Fill = quota remaining, color = band.
+// MARK: - Status bar ring
 
-func batteryBarsImage(fiveRemaining: Double, fiveBand: UsageBand,
-                      weekRemaining: Double?, weekBand: UsageBand?) -> NSImage {
-    let width: CGFloat = 42
-    let fiveHeight: CGFloat = 5
-    let weekHeight: CGFloat = 3
-    let gap: CGFloat = 3
-    let nub: CGFloat = 2
-    let height = fiveHeight + gap + weekHeight
-    let track = NSColor.systemGray.withAlphaComponent(0.55)
-
-    let image = NSImage(size: NSSize(width: width + nub + 1, height: height))
-    image.lockFocusFlipped(true)
-    drawBattery(rect: NSRect(x: 0, y: 0, width: width, height: fiveHeight),
-                remaining: fiveRemaining, color: fiveBand.color, track: track,
-                nubWidth: nub, nubColor: track)
-    if let weekRemaining, let weekBand {
-        drawBattery(rect: NSRect(x: 0, y: fiveHeight + gap, width: width - 8, height: weekHeight),
-                    remaining: weekRemaining,
-                    color: weekBand.color.withAlphaComponent(0.75),
-                    track: track.withAlphaComponent(0.7),
-                    nubWidth: 0, nubColor: .clear)
+/// Filled donut arc showing the portion of quota remaining, band-colored.
+/// Bitmap-backed via lockFocus — drawingHandler-based images have proven
+/// unreliable in NSStatusBarButton.
+func ringImage(fraction: Double, color: NSColor, diameter: CGFloat = 14) -> NSImage {
+    let clamped = min(max(fraction, 0), 1)
+    let image = NSImage(size: NSSize(width: diameter, height: diameter))
+    image.lockFocus()
+    let line: CGFloat = 3
+    let inset = line / 2 + 1
+    let bounds = NSRect(x: inset, y: inset,
+                        width: diameter - inset * 2, height: diameter - inset * 2)
+    let track = NSBezierPath(ovalIn: bounds)
+    track.lineWidth = line
+    NSColor.tertiaryLabelColor.setStroke()
+    track.stroke()
+    if clamped > 0.01 {
+        let arc = NSBezierPath()
+        arc.appendArc(withCenter: NSPoint(x: bounds.midX, y: bounds.midY),
+                      radius: bounds.width / 2,
+                      startAngle: 90,
+                      endAngle: 90 - 360 * CGFloat(clamped),
+                      clockwise: true)
+        arc.lineWidth = line
+        arc.lineCapStyle = .round
+        color.setStroke()
+        arc.stroke()
     }
     image.unlockFocus()
     image.isTemplate = false
     return image
 }
 
-private func drawBattery(rect: NSRect, remaining: Double, color: NSColor,
-                         track: NSColor, nubWidth: CGFloat, nubColor: NSColor) {
-    let body = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
-    track.setStroke()
-    body.lineWidth = 1
-    body.stroke()
-    if nubWidth > 0 {
-        let nubRect = NSRect(x: rect.maxX + 1, y: rect.midY - rect.height / 4 + 0.5,
-                             width: nubWidth, height: rect.height / 2 - 1)
-        nubColor.setFill()
-        NSBezierPath(roundedRect: nubRect, xRadius: 1, yRadius: 1).fill()
-    }
-    let inset: CGFloat = 1.5
-    let inner = rect.insetBy(dx: inset, dy: inset)
-    let fillWidth = inner.width * CGFloat(min(max(remaining, 0), 1))
-    if fillWidth > 0.5 {
-        let fill = NSBezierPath(roundedRect: NSRect(x: inner.origin.x, y: inner.origin.y,
-                                                    width: fillWidth, height: inner.height),
-                                xRadius: inner.height / 2, yRadius: inner.height / 2)
-        color.setFill()
-        fill.fill()
-    }
-}
+// MARK: - Menu bars
 
-// MARK: - Ring drawing (shared with the popover)
-
-/// Donut arc; adapts to the receiver's coordinate system via `flipped`.
-/// Starts at the visual top, fills clockwise.
-func strokeRing(in bounds: NSRect, fraction: Double, color: NSColor,
-                lineWidth: CGFloat, trackColor: NSColor, flipped: Bool) {
-    let clamped = min(max(fraction, 0), 1)
-    let track = NSBezierPath(ovalIn: bounds)
-    track.lineWidth = lineWidth
-    trackColor.setStroke()
-    track.stroke()
-    if clamped > 0.01 {
-        let arc = NSBezierPath()
-        arc.appendArc(withCenter: NSPoint(x: bounds.midX, y: bounds.midY),
-                      radius: bounds.width / 2,
-                      startAngle: flipped ? -90 : 90,
-                      endAngle: flipped ? -90 + 360 * CGFloat(clamped)
-                                        : 90 - 360 * CGFloat(clamped),
-                      clockwise: !flipped)
-        arc.lineWidth = lineWidth
-        arc.lineCapStyle = .round
-        color.setStroke()
-        arc.stroke()
-    }
+/// Block bar for menu rows: filled runs in the band color, rest muted.
+func coloredBlocks(pct: Double, band: UsageBand, width: Int = 12) -> NSAttributedString {
+    let clamped = min(max(pct, 0), 100)
+    let filled = Int((clamped / 100 * Double(width)).rounded())
+    let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+    let composed = NSMutableAttributedString(
+        attributedString: StatusText.run(String(repeating: "█", count: filled),
+                                         color: band.color, font: font))
+    composed.append(StatusText.run(String(repeating: "░", count: max(width - filled, 0)),
+                                   color: .tertiaryLabelColor, font: font))
+    return composed
 }

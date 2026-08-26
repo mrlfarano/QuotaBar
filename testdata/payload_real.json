@@ -1,0 +1,4 @@
+{"code":200,"success":true,"data":{"level":"max","limits":[
+  {"type":"TIME_LIMIT","unit":5,"percentage":3,"currentValue":139,"remaining":3861,"usage":4000,"nextResetTime":1788719742998,"usageDetails":[{"modelCode":"search-prime","usage":134},{"modelCode":"web-reader","usage":5}]},
+  {"type":"TOKENS_LIMIT","unit":3,"percentage":2,"nextResetTime":1787793577380},
+  {"type":"TOKENS_LIMIT","unit":6,"percentage":1,"nextResetTime":1788201342998}]}}
