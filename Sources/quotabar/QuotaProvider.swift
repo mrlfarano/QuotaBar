@@ -35,6 +35,9 @@ struct Snapshot: Codable {
 struct GitHubSourceConfig: Codable {
     var enabled: Bool = true
     var token: String = ""   // optional; raises 60/hr → 5000/hr core limit
+    // Optional so configs written before discovery existed still decode
+    // (synthesized Codable requires non-optional keys to be present).
+    var discovered: Bool? = nil
 }
 
 /// User-defined provider: any JSON endpoint reporting used/limit (+optional
@@ -55,6 +58,21 @@ struct CustomSourceConfig: Codable {
 struct SourcesConfig: Codable {
     var github: GitHubSourceConfig? = GitHubSourceConfig()
     var custom: [CustomSourceConfig]? = nil
+    var claude: OAuthSourceConfig? = nil
+    var codex: OAuthSourceConfig? = nil
+}
+
+/// Credential holder for sources whose tokens come from CLI auth files
+/// (Claude Code, Codex). An empty `token` means "read the CLI's own auth
+/// file live at fetch time", which stays fresh whenever the CLI re-auths.
+/// Non-empty `token`/`refreshToken` are refresh results we persist so a
+/// rotated refresh token isn't lost.
+struct OAuthSourceConfig: Codable {
+    var enabled: Bool = true
+    var token: String = ""
+    var refreshToken: String? = nil
+    var accountId: String? = nil
+    var discovered: Bool = false
 }
 
 struct QuotaBarConfig: Codable {

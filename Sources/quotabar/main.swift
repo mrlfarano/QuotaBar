@@ -26,6 +26,27 @@ if CommandLine.arguments.contains("--parse"), let file = CommandLine.arguments.l
     exit(2)
 }
 
+// Offline parser checks for the OAuth sources:
+//   quotabar --parse-claude payload.json  /  quotabar --parse-codex payload.json
+if CommandLine.arguments.contains("--parse-claude") || CommandLine.arguments.contains("--parse-codex"),
+   let file = CommandLine.arguments.last {
+    let parseClaude = CommandLine.arguments.contains("--parse-claude")
+    if let data = FileManager.default.contents(atPath: file),
+       let object = try? JSONSerialization.jsonObject(with: data),
+       let root = object as? [String: Any] {
+        let gauges = parseClaude ? ClaudeSource.gauges(from: root) : CodexSource.gauges(from: root)
+        let lines = gauges.map { gauge -> String in
+            var text = "\(gauge.id)=\(Int(gauge.pct.rounded()))%"
+            if let reset = gauge.resetAt { text += " resets@\(Int(reset.timeIntervalSince1970))" }
+            return text
+        }
+        print(lines.joined(separator: " "))
+        exit(gauges.isEmpty ? 1 : 0)
+    }
+    FileHandle.standardError.write(Data("quotabar --parse-\(parseClaude ? "claude" : "codex"): could not read \(file)\n".utf8))
+    exit(2)
+}
+
 // Offline custom-source check: quotabar --parse-custom config.json payload.json
 if CommandLine.arguments.contains("--parse-custom"), CommandLine.arguments.count >= 4 {
     func loadJSON(_ path: String) -> [String: Any]? {
@@ -65,20 +86,40 @@ let delegate = AppDelegate(demoMode: demoMode)
 app.delegate = delegate
 app.setActivationPolicy(.accessory) // menu-bar only, no Dock icon
 
-if CommandLine.arguments.contains("--probe") {
+if let probeIndex = CommandLine.arguments.firstIndex(of: "--probe") {
+    let next = probeIndex + 1 < CommandLine.arguments.count ? CommandLine.arguments[probeIndex + 1] : "zai"
+    let target = ["claude", "codex"].contains(next) ? next : "zai"
     let config = ConfigStore.load()
-    guard !resolvedToken(config: config).isEmpty else {
-        FileHandle.standardError.write(Data("quotabar --probe: no token. Set QUOTABAR_ZAI_TOKEN or ~/.quotabar/config.json\n".utf8))
-        exit(2)
-    }
-    Task {
-        let snap = await ZaiSource.fetchSnapshot(config: config)
-        print("gauges:", snap.gauges.map { "\($0.id)=\(Int($0.pct))%" }.joined(separator: " "))
-        print("authScheme:", snap.usedScheme.trimmingCharacters(in: .whitespaces) == "" ? "(raw)" : snap.usedScheme.trimmingCharacters(in: .whitespaces))
-        if let msg = snap.errorMessage { print("error:", msg) }
-        print("--- raw ---")
-        print(snap.rawJSON.isEmpty ? "(none)" : snap.rawJSON)
-        exit(snap.errorMessage == nil && !snap.gauges.isEmpty ? 0 : 1)
+    if target == "zai" {
+        guard !resolvedToken(config: config).isEmpty else {
+            FileHandle.standardError.write(Data("quotabar --probe: no token. Set QUOTABAR_ZAI_TOKEN or ~/.quotabar/config.json\n".utf8))
+            exit(2)
+        }
+        Task {
+            let snap = await ZaiSource.fetchSnapshot(config: config)
+            print("gauges:", snap.gauges.map { "\($0.id)=\(Int($0.pct))%" }.joined(separator: " "))
+            print("authScheme:", snap.usedScheme.trimmingCharacters(in: .whitespaces) == "" ? "(raw)" : snap.usedScheme.trimmingCharacters(in: .whitespaces))
+            if let msg = snap.errorMessage { print("error:", msg) }
+            print("--- raw ---")
+            print(snap.rawJSON.isEmpty ? "(none)" : snap.rawJSON)
+            exit(snap.errorMessage == nil && !snap.gauges.isEmpty ? 0 : 1)
+        }
+    } else {
+        Task {
+            let section: SourceSection
+            let tokenUpdate: OAuthSourceConfig?
+            if target == "claude" {
+                (section, tokenUpdate) = await ClaudeSource.fetch(config: config.sources?.claude)
+            } else {
+                (section, tokenUpdate) = await CodexSource.fetch(config: config.sources?.codex)
+            }
+            print("section:", section.title)
+            print("gauges:", section.gauges.map { "\($0.id)=\(Int($0.pct))%" }.joined(separator: " "))
+            if let reset = section.gauges.first?.resetAt { print("resets:", Int(reset.timeIntervalSince1970)) }
+            if let msg = section.errorMessage { print("error:", msg) }
+            if tokenUpdate != nil { print("(token refresh produced new credentials — the app menu persists them)") }
+            exit(section.errorMessage == nil && !section.gauges.isEmpty ? 0 : 1)
+        }
     }
     dispatchMain()
 } else {
@@ -116,12 +157,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.title = "quotabar…"
         menu.delegate = self
         statusItem.menu = menu
+        runLaunchDiscovery()
         loadCachedSnapshot()
         rebuild(reason: "launch")
         Task { @MainActor in await refreshNow() }
         Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             self?.pollTick()
         }
+    }
+
+    // MARK: discovery
+
+    /// Enable sources whose CLI credentials exist on disk, before first fetch.
+    private func runLaunchDiscovery() {
+        var scanned = config
+        let outcome = SourceDiscovery.run(config: &scanned)
+        guard outcome.changed else { return }
+        config = scanned
+        ConfigStore.save(config)
     }
 
     // MARK: polling
@@ -193,6 +246,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                    errorMessage: zai.errorMessage))
         if config.sources?.github?.enabled ?? true {
             built.append(await GitHubSource.fetch(token: config.sources?.github?.token))
+        }
+        if config.sources?.claude?.enabled ?? false {
+            let (section, update) = await ClaudeSource.fetch(config: config.sources?.claude)
+            if let update { config.sources?.claude = update; ConfigStore.save(config) }
+            built.append(section)
+        }
+        if config.sources?.codex?.enabled ?? false {
+            let (section, update) = await CodexSource.fetch(config: config.sources?.codex)
+            if let update { config.sources?.codex = update; ConfigStore.save(config) }
+            built.append(section)
         }
         for custom in config.sources?.custom ?? [] {
             built.append(await CustomSource.fetch(custom))
@@ -408,6 +471,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let token = NSMenuItem(title: "Set Token…", action: #selector(setToken(_:)), keyEquivalent: "")
             token.target = self
             menu.addItem(token)
+            let discover = NSMenuItem(title: "Discover Sources", action: #selector(discoverSources(_:)), keyEquivalent: "d")
+            discover.target = self
+            menu.addItem(discover)
         }
 
         menu.addItem(.separator())
@@ -456,6 +522,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let text = snapshot?.rawJSON.isEmpty == false ? snapshot!.rawJSON : (snapshot?.errorMessage ?? "")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc private func discoverSources(_ sender: Any?) {
+        var scanned = config
+        let outcome = SourceDiscovery.run(config: &scanned)
+        if outcome.changed {
+            config = scanned
+            ConfigStore.save(config)
+            rebuild(reason: "discovered")
+        }
+        let alert = NSAlert()
+        alert.messageText = "Source discovery"
+        alert.informativeText = outcome.lines.joined(separator: "\n")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func setToken(_ sender: Any?) {

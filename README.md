@@ -22,11 +22,23 @@ Menu (click):
   Core requests   █░░░░░░░░░░░   8% used · 92% left
       5 / 60 requests · Resets in 40m
   ─────────────────────────────
+  Claude (Pro/Max) · usage
+  5-hour window   ██████░░░░░░  41% used · 59% left
+      Resets in 2h 13m
+  Weekly limit    ██░░░░░░░░░░  18% used · 82% left
+      Resets in 4d 12h
+  ─────────────────────────────
+  Codex (plus) · usage
+  5-hour window   ░░░░░░░░░░░░   0% used · 100% left
+  Weekly limit    ████░░░░░░░░  36% used · 64% left
+      Resets in 4d 22h
+  ─────────────────────────────
   Updated 18:02 (just now), poll 5m
   ─────────────────────────────
   Refresh Now           ⌘R
   Copy Raw Response
   Set Token…
+  Discover Sources      ⌘D
   ─────────────────────────────
   Quit QuotaBar         ⌘Q
 ```
@@ -56,8 +68,12 @@ scripts/make-app.sh                 # swift build -c release + build/QuotaBar.ap
 open build/QuotaBar.app             # menu bar app (accessory, no Dock icon)
 
 .build/release/quotabar --demo      # synthetic gauges, no network/token needed
-.build/release/quotabar --probe     # fetch once, print parsed gauges + raw JSON
-.build/release/quotabar --parse payload.json   # run the parser on a saved payload
+.build/release/quotabar --probe     # fetch once (z.ai), print parsed gauges + raw JSON
+.build/release/quotabar --probe claude   # one-shot Claude usage check
+.build/release/quotabar --probe codex    # one-shot Codex usage check
+.build/release/quotabar --parse payload.json        # z.ai parser on a saved payload
+.build/release/quotabar --parse-claude payload.json # Claude parser on a fixture
+.build/release/quotabar --parse-codex payload.json  # Codex parser on a fixture
 ```
 
 ## Launch at login
@@ -82,6 +98,10 @@ Built-ins:
   Token… (see below).
 - **GitHub API rate limit** (`github`) — on by default, no credentials
   (60/hr core budget); add a token for 5000/hr:
+- **Claude Pro/Max** (`claude`) — 5-hour + weekly utilization via Claude
+  Code's own OAuth session (unofficial endpoint, see below).
+- **Codex / ChatGPT plan** (`codex`) — 5-hour + weekly windows via the
+  Codex CLI's stored ChatGPT OAuth token (unofficial endpoint, see below).
 
   ```json
   { "sources": { "github": { "enabled": true, "token": "ghp_…" } } }
@@ -113,6 +133,41 @@ Paths are dot-separated into the response JSON (`data.usage`, `items.0.left`);
 arrays use integer indices. `token` is sent as `Authorization: Bearer …`;
 extra headers via `headers`. `resetPath` accepts epoch seconds/milliseconds
 or ISO8601 and feeds the countdown.
+
+## Auto-discovery (Claude, Codex, GitHub)
+
+At launch — and any time via **Discover Sources** (⌘D) — QuotaBar scans
+well-known CLI credential locations and enables the matching sources:
+
+| Source | Looks at | Stores in config |
+|--------|----------|------------------|
+| `claude` | `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`) | nothing — reads the file live |
+| `codex`  | `~/.codex/auth.json` (`tokens.access_token`, `tokens.account_id`) | nothing — reads the file live |
+| `github` | `GH_TOKEN` / `GITHUB_TOKEN` env vars | the token |
+
+Rules: an `enabled: false` entry is never touched; a user-set token is never
+overwritten; discovered entries are marked `"discovered": true`. Deleting an
+entry re-enables discovery for that source on the next scan. The macOS
+Keychain is deliberately not scanned.
+
+**Claude**: uses the same OAuth session Claude Code uses
+(`api.anthropic.com/api/oauth/usage`, beta `oauth-2025-04-20`). If the
+stored access token expires, QuotaBar refreshes it via
+`api.anthropic.com/v1/oauth/token`; when that fails (Claude Code hasn't run
+recently) the menu shows
+"run `claude` once to re-authenticate" — opening Claude Code refreshes the
+credential file and QuotaBar picks it up on the next poll.
+
+**Codex**: mirrors the Codex CLI (`chatgpt.com/backend-api/wham/usage`,
+`ChatGPT-Account-Id` header). On 401 it refreshes via
+`auth.openai.com/oauth/token` and keeps the rotated tokens in
+`~/.quotabar/config.json`; `~/.codex/auth.json` is never written. Refresh
+tokens can rotate — if Codex CLI later re-auths, its copy wins again
+automatically (the file is re-read live unless a refresh result is stored).
+
+Both endpoints are reverse-engineered from the CLIs' own traffic and can
+change without notice. They expose percentage utilization only, so gauge
+detail rows show the reset countdown (no used/total token counts).
 
 The source layer is generic (`SourceSection` = id + title + gauges + error);
 a compiled-in third built-in is a fetch function plus a config flag.
@@ -184,6 +239,9 @@ the shape ever changes. Sibling endpoints in the same module (not yet used):
 
 ## Roadmap
 
+- Official cost/credit APIs as additional sources: Anthropic Admin
+  `cost_report` + OpenAI `/v1/organization/costs` month-to-date spend vs a
+  configurable monthly limit, and OpenRouter `/api/v1/credits`.
 - In-app OAuth sign-in (chat.z.ai authorize → zcode.z.ai token exchange →
   api.z.ai business login) to remove the copy-from-browser step.
 - More sources behind the same menu (the source layer is generic: fetch raw +
