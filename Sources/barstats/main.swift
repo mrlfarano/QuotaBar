@@ -197,14 +197,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: rendering
 
-    /// Paint the status item: band-colored ring + multi-color text.
-    /// Always shows the 5h quota left and its reset countdown; weekly follows.
+    /// Paint the status item: concentric dual-ring glyph + escalating text
+    /// (green = countdown only; yellow/red add the colored percent).
     private func updateStatusItem() {
-        guard let button = statusItem.button else { return }
         if demoMode {
-            if let snap = snapshot, let five = snap.gauges.first(where: { $0.id == "fiveHour" }) {
-                button.image = ringImage(fraction: five.remainingPct / 100, color: five.band.color)
-                button.attributedTitle = statusText(snap: snap, demo: true) ?? NSAttributedString()
+            if let snap = snapshot, snap.gauges.contains(where: { $0.id == "fiveHour" }) {
+                applyGlyph(snap: snap, demo: true)
             } else {
                 setTransient("Z·demo")
             }
@@ -216,13 +214,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          ? "⚠︎ z.ai auth" : "⚠︎ z.ai")
             return
         }
-        if let text = statusText(snap: snap, demo: false) {
-            button.attributedTitle = text
-        } else {
+        guard snap.gauges.contains(where: { $0.id == "fiveHour" || $0.id == "week" }) else {
             setTransient("z.ai")
+            return
         }
-        button.image = snap.gauges.first(where: { $0.id == "fiveHour" })
-            .map { ringImage(fraction: $0.remainingPct / 100, color: $0.band.color) }
+        applyGlyph(snap: snap, demo: false)
+    }
+
+    private func applyGlyph(snap: Snapshot, demo: Bool) {
+        guard let button = statusItem.button else { return }
+        let five = snap.gauges.first(where: { $0.id == "fiveHour" })
+        let week = snap.gauges.first(where: { $0.id == "week" })
+        button.image = dualRingImage(fiveRemaining: five?.remainingPct,
+                                     fiveBand: five?.band,
+                                     weekRemaining: week?.remainingPct,
+                                     weekBand: week?.band)
+        let headline = five ?? week
+        button.attributedTitle = headline.map { escalationTitle(for: $0, demo: demo) }
+            ?? NSAttributedString()
         var tip = "Z.AI Coding Plan"
         for gauge in snap.gauges {
             tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used"
@@ -234,28 +243,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = tip
     }
 
-    private func statusText(snap: Snapshot, demo: Bool) -> NSAttributedString? {
+    /// Escalating text: calm when green, numbers when it matters.
+    private func escalationTitle(for gauge: Gauge, demo: Bool) -> NSAttributedString {
         let composed = NSMutableAttributedString()
-        guard let five = snap.gauges.first(where: { $0.id == "fiveHour" }) else {
-            guard let week = snap.gauges.first(where: { $0.id == "week" }) else { return nil }
-            composed.append(StatusText.run("wk ", color: .secondaryLabelColor))
-            composed.append(StatusText.run("\(Int(week.remainingPct.rounded()))% left",
-                                           color: week.band.color, font: StatusText.emphasis))
-            return composed
-        }
-        composed.append(StatusText.run("5h ", color: .secondaryLabelColor))
-        composed.append(StatusText.run("\(Int(five.remainingPct.rounded()))% left",
-                                       color: five.band.color, font: StatusText.emphasis))
-        if let short = shortReset(five.resetAt) {
-            composed.append(StatusText.run(" · \(short)", color: .tertiaryLabelColor))
-        }
-        if let week = snap.gauges.first(where: { $0.id == "week" }) {
-            composed.append(StatusText.run(" · wk ", color: .secondaryLabelColor))
-            composed.append(StatusText.run("\(Int(week.remainingPct.rounded()))% left",
-                                           color: week.band.color))
+        let remaining = Int(gauge.remainingPct.rounded())
+        let short = shortReset(gauge.resetAt)
+        switch gauge.band {
+        case .green:
+            composed.append(StatusText.run(short ?? "\(remaining)%",
+                                           color: .secondaryLabelColor))
+        case .yellow, .red:
+            composed.append(StatusText.run("\(remaining)%", color: gauge.band.color,
+                                           font: StatusText.emphasis))
+            if let short {
+                let warning = gauge.band == .red ? " ⚠︎" : ""
+                composed.append(StatusText.run(" · \(short)\(warning)",
+                                               color: .secondaryLabelColor))
+            }
         }
         if demo {
-            composed.append(StatusText.run(" (demo)", color: .quaternaryLabelColor))
+            composed.append(StatusText.run(" demo", color: .tertiaryLabelColor))
         }
         return composed
     }

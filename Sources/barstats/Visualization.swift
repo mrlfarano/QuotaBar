@@ -53,38 +53,55 @@ func shortReset(_ date: Date?) -> String? {
     return "\(minutes)m"
 }
 
-// MARK: - Status bar ring
+// MARK: - Status bar glyph (B2 concentric dual ring)
+//
+// One 20×20 glyph: outer ring = 5-hour quota remaining, inner ring =
+// weekly remaining, both band-colored and filling clockwise from 12
+// o'clock. Bitmap-backed via lockFocus — drawingHandler-based images have
+// proven unreliable in NSStatusBarButton.
 
-/// Filled donut arc showing the portion of quota remaining, band-colored.
-/// Bitmap-backed via lockFocus — drawingHandler-based images have proven
-/// unreliable in NSStatusBarButton.
-func ringImage(fraction: Double, color: NSColor, diameter: CGFloat = 14) -> NSImage {
-    let clamped = min(max(fraction, 0), 1)
-    let image = NSImage(size: NSSize(width: diameter, height: diameter))
+func dualRingImage(fiveRemaining: Double?, fiveBand: UsageBand?,
+                   weekRemaining: Double?, weekBand: UsageBand?) -> NSImage {
+    let size: CGFloat = 20
+    let image = NSImage(size: NSSize(width: size, height: size))
     image.lockFocus()
-    let line: CGFloat = 3
-    let inset = line / 2 + 1
-    let bounds = NSRect(x: inset, y: inset,
-                        width: diameter - inset * 2, height: diameter - inset * 2)
-    let track = NSBezierPath(ovalIn: bounds)
-    track.lineWidth = line
-    NSColor.tertiaryLabelColor.setStroke()
-    track.stroke()
-    if clamped > 0.01 {
-        let arc = NSBezierPath()
-        arc.appendArc(withCenter: NSPoint(x: bounds.midX, y: bounds.midY),
-                      radius: bounds.width / 2,
-                      startAngle: 90,
-                      endAngle: 90 - 360 * CGFloat(clamped),
-                      clockwise: true)
-        arc.lineWidth = line
-        arc.lineCapStyle = .round
-        color.setStroke()
-        arc.stroke()
+    let center = NSPoint(x: size / 2, y: size / 2)
+
+    // Weekly-only fallback: weekly takes the outer ring, no inner ring.
+    let outerRemaining = fiveRemaining ?? weekRemaining
+    let outerColor = (fiveBand ?? weekBand)?.color
+    if let fraction = outerRemaining, let color = outerColor {
+        strokeArc(center: center, radius: 8.25, lineWidth: 3.5,
+                  fraction: fraction / 100, color: color)
+    }
+    if fiveRemaining != nil, let fraction = weekRemaining, let color = weekBand?.color {
+        strokeArc(center: center, radius: 4.25, lineWidth: 2,
+                  fraction: fraction / 100, color: color)
     }
     image.unlockFocus()
     image.isTemplate = false
     return image
+}
+
+private func strokeArc(center: NSPoint, radius: CGFloat, lineWidth: CGFloat,
+                       fraction: Double, color: NSColor) {
+    let track = NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
+                                            width: radius * 2, height: radius * 2))
+    track.lineWidth = lineWidth
+    NSColor.tertiaryLabelColor.setStroke()
+    track.stroke()
+    let clamped = min(max(fraction, 0), 1)
+    if clamped > 0.01 {
+        let arc = NSBezierPath()
+        arc.appendArc(withCenter: center, radius: radius,
+                      startAngle: 90,
+                      endAngle: 90 - 360 * CGFloat(clamped),
+                      clockwise: true)
+        arc.lineWidth = lineWidth
+        arc.lineCapStyle = .round
+        color.setStroke()
+        arc.stroke()
+    }
 }
 
 // MARK: - Menu bars

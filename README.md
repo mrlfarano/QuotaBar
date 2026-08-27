@@ -5,8 +5,9 @@ information from external sources. First source: **Z.AI GLM Coding Plan**
 usage against the rolling **5-hour window** and the **weekly limit**.
 
 ```
-Status bar:  [◉] 5h 76% left · 2h47m · wk 42% left
-             ring fill + % colored by band; ⚠︎ states on errors
+Status bar:  [◎ dual ring: outer = 5h, inner = weekly] 9h24m
+             green state shows only the reset countdown;
+             yellow/red add the colored percent (41% · 43m, 18% · 12m ⚠︎)
 
 Menu (click):
   Z.AI Coding Plan (max) · api.z.ai
@@ -41,10 +42,12 @@ run out):
 | 26–75% | 25–74% | 🟡 yellow |
 | ≤ 25% | ≥ 75% | 🔴 red |
 
-The status-bar ring shows the 5-hour window's remaining fraction in its band
-color, followed by multi-color text (remaining %, reset countdown, weekly).
-Menu bars use the same banding. Thresholds live in
-`UsageBand.of(remainingPct:)` in `Sources/barstats/Visualization.swift`.
+The status item is one 20×20 glyph: an outer ring for the 5-hour quota and
+an inner ring for the weekly quota, both filling clockwise in their band
+color. The text escalates with severity — countdown only when green, colored
+percent from yellow, warning glyph on red. Design previews live in
+`docs/design/`. Thresholds live in `UsageBand.of(remainingPct:)` in
+`Sources/barstats/Visualization.swift`.
 
 ## Build & run
 
