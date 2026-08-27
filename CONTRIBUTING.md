@@ -1,7 +1,8 @@
 # Contributing to QuotaBar
 
 Thanks for wanting to help! QuotaBar is a small, dependency-free SwiftPM
-project — a good first issue usually fits in one file.
+project — a good first issue usually fits in one file. By participating you
+agree to uphold the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Getting started
 
