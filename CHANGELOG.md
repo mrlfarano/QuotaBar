@@ -63,7 +63,7 @@ All notable changes to QuotaBar are documented here. The format follows
   response, token entry; launch-at-login framework and the generic source
   layer.
 
-[0.8.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.5.0...v0.6.0
+[0.8.0]: https://github.com/mrlfarano/QuotaBar/compare/91fac68...v0.8.0
+[0.7.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.6...91fac68
+[0.6.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.5...v0.6
 [0.5.0]: https://github.com/mrlfarano/QuotaBar/compare/67876d0...27ba712
