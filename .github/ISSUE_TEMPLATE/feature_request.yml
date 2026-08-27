@@ -1,0 +1,38 @@
+name: Feature request / new provider
+description: Suggest an idea, or propose a new quota provider
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New provider
+        - UI / status bar
+        - Config / discovery
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What do you want to monitor, and what's missing?
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: For new providers — endpoint details
+      description: |
+        If you know (or can capture) the endpoint the provider's own dashboard
+        or CLI uses, include method, URL, auth header style, and a sanitized
+        response snippet. `used`/`limit`/reset values are what a gauge needs.
+      render: text
+  - type: checkboxes
+    id: custom
+    attributes:
+      label: Workaround check
+      options:
+        - label: I know this can't already be done with a `sources.custom` entry in config
+          required: true

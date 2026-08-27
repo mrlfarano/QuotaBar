@@ -6,11 +6,12 @@ cd "$(dirname "$0")/.."
 swift build -c release
 
 APP="build/QuotaBar.app"
+VERSION="${VERSION:-0.1.0}"   # release workflow passes the tag, e.g. v0.8.0
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp .build/release/quotabar "$APP/Contents/MacOS/quotabar"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -19,7 +20,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key>                <string>QuotaBar</string>
     <key>CFBundleExecutable</key>          <string>quotabar</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
-    <key>CFBundleShortVersionString</key>  <string>0.1.0</string>
+    <key>CFBundleShortVersionString</key>  <string>${VERSION#v}</string>
     <key>LSUIElement</key>                 <true/>
     <key>NSHighResolutionCapable</key>     <true/>
 </dict>
