@@ -251,14 +251,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch gauge.band {
         case .green:
             composed.append(StatusText.run(short ?? "\(remaining)%",
-                                           color: .secondaryLabelColor))
+                                           color: .labelColor))
         case .yellow, .red:
             composed.append(StatusText.run("\(remaining)%", color: gauge.band.color,
                                            font: StatusText.emphasis))
             if let short {
                 let warning = gauge.band == .red ? " ⚠︎" : ""
                 composed.append(StatusText.run(" · \(short)\(warning)",
-                                               color: .secondaryLabelColor))
+                                               color: .labelColor))
             }
         }
         if demo {
@@ -267,14 +267,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return composed
     }
 
-    /// Plain gray text for transient/error states.
+    /// Full-strength text for transient/error states.
     private func setTransient(_ text: String) {
         guard let button = statusItem.button else { return }
         button.image = nil
         button.toolTip = nil
         button.attributedTitle = NSAttributedString(
             string: text,
-            attributes: [.font: StatusText.base, .foregroundColor: NSColor.secondaryLabelColor])
+            attributes: [.font: StatusText.base, .foregroundColor: NSColor.labelColor])
     }
 
     // MARK: menu
