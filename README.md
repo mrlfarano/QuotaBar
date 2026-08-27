@@ -70,21 +70,52 @@ scripts/uninstall-login.sh   # remove the agent (app stays in ~/Applications)
 The agent (`com.la.barstats`) starts the app at login with `RunAtLoad`;
 quitting the app keeps it quit until the next login.
 
-## Sources
+## Providers
 
-Each external source renders as its own menu section; the z.ai coding plan
-remains the only source driving the status bar and the snapshot cache.
+Each provider renders as its own menu section. The **status bar** shows the
+provider selected under "Status Bar Source:" in the menu (stored as
+`mainSource`), falling back to z.ai if it fails.
 
-- **Z.AI Coding Plan** — primary; token via Set Token… (see below).
-- **GitHub API rate limit** — on by default, no credentials needed
-  (60/hr core budget; add a token in `~/.barstats/config.json` for 5000/hr):
+Built-ins:
+
+- **Z.AI Coding Plan** (`zai`) — primary coding-plan usage; token via Set
+  Token… (see below).
+- **GitHub API rate limit** (`github`) — on by default, no credentials
+  (60/hr core budget); add a token for 5000/hr:
 
   ```json
   { "sources": { "github": { "enabled": true, "token": "ghp_…" } } }
   ```
 
-The source layer is generic (`SourceSection` = title + gauges + error);
-adding a third source is a fetch function plus a config flag.
+**Any other JSON provider** can be added without recompiling via `custom`:
+
+```json
+{
+  "mainSource": "openrouter",
+  "sources": {
+    "custom": [
+      {
+        "id": "openrouter",
+        "title": "OpenRouter credits",
+        "url": "https://openrouter.ai/api/v1/credits",
+        "token": "sk-or-…",
+        "headers": { "X-Title": "barstats" },
+        "usedPath":  "data.usage",
+        "limitPath": "data.limit",
+        "resetPath": "data.reset_at"
+      }
+    ]
+  }
+}
+```
+
+Paths are dot-separated into the response JSON (`data.usage`, `items.0.left`);
+arrays use integer indices. `token` is sent as `Authorization: Bearer …`;
+extra headers via `headers`. `resetPath` accepts epoch seconds/milliseconds
+or ISO8601 and feeds the countdown.
+
+The source layer is generic (`SourceSection` = id + title + gauges + error);
+a compiled-in third built-in is a fetch function plus a config flag.
 
 ## Credential setup
 

@@ -26,6 +26,40 @@ if CommandLine.arguments.contains("--parse"), let file = CommandLine.arguments.l
     exit(2)
 }
 
+// Offline custom-source check: barstats --parse-custom config.json payload.json
+if CommandLine.arguments.contains("--parse-custom"), CommandLine.arguments.count >= 4 {
+    func loadJSON(_ path: String) -> [String: Any]? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dict = object as? [String: Any] else { return nil }
+        return dict
+    }
+    let configPath = CommandLine.arguments[2]
+    let payloadPath = CommandLine.arguments[3]
+    guard var sourceDict = loadJSON(configPath), let payload = loadJSON(payloadPath),
+          (sourceDict["id"] as? String) != nil else {
+        FileHandle.standardError.write(Data("barstats --parse-custom: bad inputs\n".utf8))
+        exit(2)
+    }
+    if (sourceDict["title"] is String) == false { sourceDict["title"] = nil }
+    sourceDict["usedPath"] = (sourceDict["usedPath"] as? String) ?? ""
+    sourceDict["limitPath"] = (sourceDict["limitPath"] as? String) ?? ""
+    guard let encoded = try? JSONSerialization.data(withJSONObject: sourceDict),
+          let source = try? JSONDecoder().decode(CustomSourceConfig.self, from: encoded) else {
+        FileHandle.standardError.write(Data("barstats --parse-custom: cannot decode\n".utf8))
+        exit(2)
+    }
+    let used = CustomSource.value(at: source.usedPath, in: payload)
+    let total = CustomSource.value(at: source.limitPath, in: payload)
+    guard let total, total > 0 else {
+        print("error: limitPath '\(source.limitPath)' not found or zero")
+        exit(1)
+    }
+    let u = used ?? 0
+    print("\(source.id)=\(Int(u / total * 100))% [\(u)/\(total)]")
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate(demoMode: demoMode)
 app.delegate = delegate
@@ -137,8 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if demoMode {
             sections = [
-                SourceSection(title: "Demo data (--demo)", gauges: demoGauges),
-                SourceSection(title: "GitHub API · rate limit (demo)",
+                SourceSection(id: "zai", title: "Demo data (--demo)", gauges: demoGauges),
+                SourceSection(id: "github", title: "GitHub API · rate limit (demo)",
                               gauges: [Gauge(id: "gh-core", label: "Core requests",
                                              pct: 8, used: 5, total: 60,
                                              resetAt: Date().addingTimeInterval(40 * 60))]),
@@ -154,11 +188,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let zai = await zaiSnap
         let host = URL(string: config.baseURL)?.host ?? config.baseURL
         let level = zai.planLevel.map { " (\($0))" } ?? ""
-        built.append(SourceSection(title: "Z.AI Coding Plan\(level) · \(host)",
+        built.append(SourceSection(id: "zai", title: "Z.AI Coding Plan\(level) · \(host)",
                                    gauges: zai.gauges,
                                    errorMessage: zai.errorMessage))
         if config.sources?.github?.enabled ?? true {
             built.append(await GitHubSource.fetch(token: config.sources?.github?.token))
+        }
+        for custom in config.sources?.custom ?? [] {
+            built.append(await CustomSource.fetch(custom))
         }
         sections = built
         applySnapshot(zai)
@@ -221,19 +258,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applyGlyph(snap: snap, demo: false)
     }
 
+    /// Gauges driving the status bar: the source selected by config.mainSource
+    /// (or "zai" default), falling back to z.ai, then any healthy section.
+    private var statusGauges: [Gauge]? {
+        let wanted = (config.mainSource ?? "zai").lowercased()
+        if let match = sections.first(where: { $0.id == wanted && !$0.gauges.isEmpty }) {
+            return match.gauges
+        }
+        if let zai = sections.first(where: { $0.id == "zai" && !$0.gauges.isEmpty }) {
+            return zai.gauges
+        }
+        return sections.first(where: { !$0.gauges.isEmpty })?.gauges
+    }
+
     private func applyGlyph(snap: Snapshot, demo: Bool) {
         guard let button = statusItem.button else { return }
-        let five = snap.gauges.first(where: { $0.id == "fiveHour" })
-        let week = snap.gauges.first(where: { $0.id == "week" })
-        button.image = dualRingImage(fiveRemaining: five?.remainingPct,
-                                     fiveBand: five?.band,
-                                     weekRemaining: week?.remainingPct,
-                                     weekBand: week?.band)
-        let headline = five ?? week
-        button.attributedTitle = headline.map { escalationTitle(for: $0, demo: demo) }
-            ?? NSAttributedString()
+        let gauges = demo ? snap.gauges : statusGauges ?? snap.gauges
+        guard !gauges.isEmpty else { setTransient("⚠︎ no data"); return }
+        let primary = gauges[0]
+        let secondary = gauges.count > 1 ? gauges[1] : nil
+        button.image = dualRingImage(fiveRemaining: primary.remainingPct,
+                                     fiveBand: primary.band,
+                                     weekRemaining: secondary?.remainingPct,
+                                     weekBand: secondary?.band)
+        button.attributedTitle = escalationTitle(for: primary, demo: demo)
         var tip = "Z.AI Coding Plan"
-        for gauge in snap.gauges {
+        for gauge in gauges {
             tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used"
             if let used = gauge.used, let total = gauge.total {
                 tip += " (\(compactCount(used))/\(compactCount(total)) tokens)"
@@ -328,6 +378,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(updatedRow)
         }
 
+        // Status-bar source picker: every section that currently has data.
+        let healthyIds = sections.filter { !$0.gauges.isEmpty }.map { $0.id }
+        if healthyIds.count > 1 {
+            menu.addItem(disabledItem("Status Bar Source:"))
+            let active = (config.mainSource ?? "zai").lowercased()
+            for id in healthyIds {
+                let name = sections.first(where: { $0.id == id })?.title ?? id
+                let item = NSMenuItem(title: name, action: #selector(selectMainSource(_:)), keyEquivalent: "")
+                item.representedObject = id
+                item.target = self
+                item.state = id == active ? .on : .off
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+        }
+
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshMenuItem(_:)), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
@@ -378,6 +444,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: actions
+
+    @objc private func selectMainSource(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        config.mainSource = id
+        ConfigStore.save(config)
+        rebuild(reason: "main-source")
+    }
 
     @objc private func copyRaw(_ sender: Any?) {
         let text = snapshot?.rawJSON.isEmpty == false ? snapshot!.rawJSON : (snapshot?.errorMessage ?? "")

@@ -1,0 +1,10 @@
+{
+  "id": "openrouter",
+  "title": "OpenRouter credits",
+  "url": "https://openrouter.ai/api/v1/credits",
+  "token": "",
+  "headers": { "X-Test": "1" },
+  "usedPath": "data.usage",
+  "limitPath": "data.limit",
+  "resetPath": null
+}

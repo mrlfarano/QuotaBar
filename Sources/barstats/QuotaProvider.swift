@@ -37,8 +37,24 @@ struct GitHubSourceConfig: Codable {
     var token: String = ""   // optional; raises 60/hr → 5000/hr core limit
 }
 
+/// User-defined provider: any JSON endpoint reporting used/limit (+optional
+/// reset), located via dot paths (dict keys or integer array indices).
+struct CustomSourceConfig: Codable {
+    var id: String
+    var title: String? = nil     // menu header; defaults to id
+    var url: String
+    var token: String = ""       // optional; sent as "Authorization: Bearer …"
+    var headers: [String: String]? = nil
+    var usedPath: String = ""
+    var limitPath: String
+    var resetPath: String? = nil
+
+    var sectionTitle: String { title ?? id }
+}
+
 struct SourcesConfig: Codable {
     var github: GitHubSourceConfig? = GitHubSourceConfig()
+    var custom: [CustomSourceConfig]? = nil
 }
 
 struct BarStatsConfig: Codable {
@@ -47,8 +63,11 @@ struct BarStatsConfig: Codable {
     var baseURL: String = "https://api.z.ai"
     var pollMinutes: Int = 5
     // Optional so configs written before sources existed still decode
-    // (absent ⇒ defaults: GitHub on, no token).
+    // (absent ⇒ defaults: GitHub on, no customs, status bar = z.ai).
     var sources: SourcesConfig? = nil
+    /// Id of the provider shown on the status bar ("zai", "github", or a
+    /// custom id). Absent ⇒ "zai".
+    var mainSource: String? = nil
 }
 
 func resolvedToken(config: BarStatsConfig) -> String {
@@ -269,9 +288,9 @@ enum QuotaResponseParser {
         return entries.isEmpty ? nil : entries
     }
 
-    // MARK: tolerant leaf conversions
+    // Tolerant leaf conversions (internal so custom sources reuse them).
 
-    private static func number(_ any: Any?) -> Double? {
+    static func number(_ any: Any?) -> Double? {
         guard let any else { return nil }
         // `any is Bool` is true for NSNumber 0/1 too (bridging), which would
         // discard legitimate percentage values of 1. Real JSON booleans are
@@ -286,7 +305,7 @@ enum QuotaResponseParser {
         return nil
     }
 
-    private static func date(_ any: Any?) -> Date? {
+    static func date(_ any: Any?) -> Date? {
         if let double = number(any) {
             if double > 1_000_000_000_000 { return Date(timeIntervalSince1970: double / 1000) } // epoch ms
             if double > 1_000_000_000 { return Date(timeIntervalSince1970: double) }             // epoch s

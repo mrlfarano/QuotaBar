@@ -7,6 +7,7 @@ import Foundation
 // secondary source failing can never disturb the primary display.
 
 struct SourceSection {
+    var id: String          // "zai", "github", or a custom source id
     var title: String
     var gauges: [Gauge] = []
     var errorMessage: String? = nil
@@ -58,10 +59,11 @@ enum GitHubSource {
             used: used,
             total: limit,
             resetAt: Date(timeIntervalSince1970: reset))
-        return SourceSection(title: "GitHub API · rate limit", gauges: [gauge])
+        return SourceSection(id: "github", title: "GitHub API · rate limit", gauges: [gauge])
     }
 
     private static func section(error: String) -> SourceSection {
-        SourceSection(title: "GitHub API · rate limit", errorMessage: error)
+        SourceSection(id: "github", title: "GitHub API · rate limit",
+                      errorMessage: error)
     }
 }
