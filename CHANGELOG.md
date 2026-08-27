@@ -4,6 +4,27 @@ All notable changes to QuotaBar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/)-ish (`MAJOR.MINOR` while pre-1.0).
 
+## [0.9.0] - 2026-08-27
+
+### Added
+
+- **GitHub Copilot source** — monthly premium requests (used vs entitlement,
+  reset date) via the Copilot extension's own internal endpoints. Token chain:
+  config → opencode auth.json → VS Code hosts/apps.json; discovered
+  automatically when those files exist.
+- **OpenRouter source** — credits used vs limit (USD) via the official
+  `/api/v1/credits` API; key picked up from `OPENROUTER_API_KEY`. No-cap
+  accounts get an honest notice row instead of a fake ring.
+- **Antigravity source** — Gemini + Claude/GPT pool quotas and plan tier read
+  from the running app's local endpoint (`127.0.0.1` Connect-RPC with the
+  process's CSRF token; self-signed cert trusted for localhost only). Local
+  machine only; says "open the app" when Antigravity isn't running. (Google
+  retired Gemini CLI for individuals in June 2026 — Antigravity is the
+  Google slot now.)
+- `SourceSection.notice` — non-error info rows in the menu.
+- Probe/parse dispatch generalized; new offline checks `--parse-copilot`,
+  `--parse-openrouter`, `--parse-antigravity` with fixtures.
+
 ## [0.8.0] - 2026-08-27
 
 ### Added
@@ -63,6 +84,7 @@ All notable changes to QuotaBar are documented here. The format follows
   response, token entry; launch-at-login framework and the generic source
   layer.
 
+[0.9.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/mrlfarano/QuotaBar/compare/91fac68...v0.8.0
 [0.7.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.6...91fac68
 [0.6.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.5...v0.6

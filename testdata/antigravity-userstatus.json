@@ -1,0 +1,45 @@
+{
+  "code": 0,
+  "userStatus": {
+    "email": "REDACTED-EMAIL",
+    "userTier": {
+      "id": "5",
+      "name": "Google AI Pro",
+      "description": "Google AI Pro subscription"
+    },
+    "planStatus": {
+      "planInfo": {
+        "planName": "Pro"
+      }
+    },
+    "cascadeModelConfigData": {
+      "clientModelConfigs": [
+        {
+          "label": "Gemini 3.1 Pro (High)",
+          "modelOrAlias": { "model": "google/gemini-3.1-pro-high" },
+          "quotaInfo": { "remainingFraction": 0.62, "resetTime": "2026-08-27T21:00:00Z", "resetDescription": null }
+        },
+        {
+          "label": "Gemini 3.1 Pro (Low)",
+          "modelOrAlias": { "model": "google/gemini-3.1-pro-low" },
+          "quotaInfo": { "remainingFraction": 0.31, "resetTime": "2026-08-27T21:00:00Z", "resetDescription": null }
+        },
+        {
+          "label": "Claude Sonnet 4.6 (Thinking)",
+          "modelOrAlias": { "model": "anthropic/claude-sonnet-4.6" },
+          "quotaInfo": { "remainingFraction": 0.83, "resetTime": "2026-08-31T04:00:00Z", "resetDescription": null }
+        },
+        {
+          "label": "GPT-OSS 120B (Medium)",
+          "modelOrAlias": { "model": "openai/gpt-oss-120b" },
+          "quotaInfo": { "remainingFraction": 0.45, "resetTime": "2026-08-31T04:00:00Z", "resetDescription": null }
+        },
+        {
+          "label": "Gemini 3 Flash Image",
+          "modelOrAlias": { "model": "google/gemini-3-flash-image" },
+          "quotaInfo": { "remainingFraction": 0.98, "resetTime": null, "resetDescription": null }
+        }
+      ]
+    }
+  }
+}

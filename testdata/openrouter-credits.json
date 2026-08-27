@@ -1,0 +1,10 @@
+{
+  "data": {
+    "label": "Use: 3.27 / 10.00",
+    "usage": 3.27,
+    "usage_bonus": 0.0,
+    "limit": 10.0,
+    "limit_remaining": 6.73,
+    "is_free_tier": false
+  }
+}

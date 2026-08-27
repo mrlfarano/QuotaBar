@@ -26,15 +26,18 @@ if CommandLine.arguments.contains("--parse"), let file = CommandLine.arguments.l
     exit(2)
 }
 
-// Offline parser checks for the OAuth sources:
-//   quotabar --parse-claude payload.json  /  quotabar --parse-codex payload.json
-if CommandLine.arguments.contains("--parse-claude") || CommandLine.arguments.contains("--parse-codex"),
+// Offline parser checks for the JSON sources:
+//   quotabar --parse-claude|--parse-codex|--parse-openrouter|--parse-copilot|--parse-antigravity payload.json
+let parseFlags: [(flag: String, run: ([String: Any]) -> [Gauge])] = [
+    ("--parse-claude", ClaudeSource.gauges),
+    ("--parse-codex", CodexSource.gauges),
+]
+if let match = parseFlags.first(where: { CommandLine.arguments.contains($0.flag) }) ?? firstSectionParseFlag(),
    let file = CommandLine.arguments.last {
-    let parseClaude = CommandLine.arguments.contains("--parse-claude")
     if let data = FileManager.default.contents(atPath: file),
        let object = try? JSONSerialization.jsonObject(with: data),
        let root = object as? [String: Any] {
-        let gauges = parseClaude ? ClaudeSource.gauges(from: root) : CodexSource.gauges(from: root)
+        let gauges = match.run(root)
         let lines = gauges.map { gauge -> String in
             var text = "\(gauge.id)=\(Int(gauge.pct.rounded()))%"
             if let reset = gauge.resetAt { text += " resets@\(Int(reset.timeIntervalSince1970))" }
@@ -43,8 +46,25 @@ if CommandLine.arguments.contains("--parse-claude") || CommandLine.arguments.con
         print(lines.joined(separator: " "))
         exit(gauges.isEmpty ? 1 : 0)
     }
-    FileHandle.standardError.write(Data("quotabar --parse-\(parseClaude ? "claude" : "codex"): could not read \(file)\n".utf8))
+    FileHandle.standardError.write(Data("quotabar \(match.flag): could not read \(file)\n".utf8))
     exit(2)
+}
+
+/// Section-style sources (openrouter/copilot/antigravity) parse into a full
+/// section so notices are checkable too; gauges get printed like the rest.
+func firstSectionParseFlag() -> (flag: String, run: ([String: Any]) -> [Gauge])? {
+    let sectionFlags: [(String, ([String: Any]) -> SourceSection)] = [
+        ("--parse-openrouter", OpenRouterSource.section),
+        ("--parse-copilot", CopilotSource.section),
+        ("--parse-antigravity", AntigravitySource.section),
+    ]
+    guard let match = sectionFlags.first(where: { CommandLine.arguments.contains($0.0) }) else { return nil }
+    return (match.0, { root in
+        let section = match.1(root)
+        if let notice = section.notice { FileHandle.standardError.write(Data("notice: \(notice)\n".utf8)) }
+        if let error = section.errorMessage { FileHandle.standardError.write(Data("error: \(error)\n".utf8)) }
+        return section.gauges
+    })
 }
 
 // Offline custom-source check: quotabar --parse-custom config.json payload.json
@@ -88,7 +108,7 @@ app.setActivationPolicy(.accessory) // menu-bar only, no Dock icon
 
 if let probeIndex = CommandLine.arguments.firstIndex(of: "--probe") {
     let next = probeIndex + 1 < CommandLine.arguments.count ? CommandLine.arguments[probeIndex + 1] : "zai"
-    let target = ["claude", "codex"].contains(next) ? next : "zai"
+    let target = ["claude", "codex", "openrouter", "copilot", "antigravity"].contains(next) ? next : "zai"
     let config = ConfigStore.load()
     if target == "zai" {
         guard !resolvedToken(config: config).isEmpty else {
@@ -105,19 +125,29 @@ if let probeIndex = CommandLine.arguments.firstIndex(of: "--probe") {
             exit(snap.errorMessage == nil && !snap.gauges.isEmpty ? 0 : 1)
         }
     } else {
-        Task {
+        Task { @MainActor in
             let section: SourceSection
-            let tokenUpdate: OAuthSourceConfig?
-            if target == "claude" {
-                (section, tokenUpdate) = await ClaudeSource.fetch(config: config.sources?.claude)
-            } else {
-                (section, tokenUpdate) = await CodexSource.fetch(config: config.sources?.codex)
+            switch target {
+            case "claude":
+                let (s, _) = await ClaudeSource.fetch(config: config.sources?.claude)
+                section = s
+            case "codex":
+                let (s, _) = await CodexSource.fetch(config: config.sources?.codex)
+                section = s
+            case "openrouter":
+                section = await OpenRouterSource.fetch(config: config.sources?.openrouter)
+            case "copilot":
+                section = await CopilotSource.fetch(config: config.sources?.copilot)
+            case "antigravity":
+                section = await AntigravitySource.fetch(config: config.sources?.antigravity)
+            default:
+                section = SourceSection(id: target, title: target, errorMessage: "unknown source")
             }
             print("section:", section.title)
             print("gauges:", section.gauges.map { "\($0.id)=\(Int($0.pct))%" }.joined(separator: " "))
+            if let notice = section.notice { print("notice:", notice) }
             if let reset = section.gauges.first?.resetAt { print("resets:", Int(reset.timeIntervalSince1970)) }
             if let msg = section.errorMessage { print("error:", msg) }
-            if tokenUpdate != nil { print("(token refresh produced new credentials — the app menu persists them)") }
             exit(section.errorMessage == nil && !section.gauges.isEmpty ? 0 : 1)
         }
     }
@@ -247,6 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if config.sources?.github?.enabled ?? true {
             built.append(await GitHubSource.fetch(token: config.sources?.github?.token))
         }
+        if config.sources?.copilot?.enabled ?? false {
+            built.append(await CopilotSource.fetch(config: config.sources?.copilot))
+        }
         if config.sources?.claude?.enabled ?? false {
             let (section, update) = await ClaudeSource.fetch(config: config.sources?.claude)
             if let update { config.sources?.claude = update; ConfigStore.save(config) }
@@ -256,6 +289,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let (section, update) = await CodexSource.fetch(config: config.sources?.codex)
             if let update { config.sources?.codex = update; ConfigStore.save(config) }
             built.append(section)
+        }
+        if config.sources?.openrouter?.enabled ?? false {
+            built.append(await OpenRouterSource.fetch(config: config.sources?.openrouter))
+        }
+        if config.sources?.antigravity?.enabled ?? false {
+            built.append(await AntigravitySource.fetch(config: config.sources?.antigravity))
         }
         for custom in config.sources?.custom ?? [] {
             built.append(await CustomSource.fetch(custom))
@@ -408,6 +447,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(disabledItem("⚠︎ \(message)"))
             } else if section.gauges.isEmpty {
                 menu.addItem(disabledItem("Waiting for data"))
+            }
+            if let notice = section.notice {
+                menu.addItem(disabledItem(notice))
             }
             for gauge in section.gauges {
                 let menuFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)

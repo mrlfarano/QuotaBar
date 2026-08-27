@@ -50,6 +50,9 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] 9h24m
 | **Z.AI Coding Plan** (`zai`) | 5h + weekly token windows, MCP monthly, per-model detail | browser token (Set Token…) | reverse-engineered |
 | **Claude Pro/Max** (`claude`) | 5h + weekly utilization | Claude Code's OAuth session | reverse-engineered |
 | **Codex / ChatGPT** (`codex`) | 5h + weekly windows, plan tier | Codex CLI's stored token | reverse-engineered |
+| **GitHub Copilot** (`copilot`) | monthly premium requests used vs entitlement | opencode/VS Code auth files, or paste | reverse-engineered |
+| **Antigravity** (`antigravity`) | Gemini + Claude/GPT pool quotas, plan tier | none — reads the app's local endpoint | local (app must run) |
+| **OpenRouter** (`openrouter`) | credits used vs limit (USD) | `OPENROUTER_API_KEY` or paste | official |
 | **GitHub** (`github`) | API core rate limit | optional `GH_TOKEN` | official |
 | **Custom** (n many) | any JSON with used/limit (+reset) | whatever you configure | yours |
 
@@ -63,7 +66,11 @@ you already have on disk and enables the matching sources:
 
 - `~/.claude/.credentials.json` → `claude`
 - `~/.codex/auth.json` → `codex`
-- `GH_TOKEN` / `GITHUB_TOKEN` env vars → `github`
+- opencode `~/.local/share/opencode/auth.json` or VS Code
+  `~/.config/github-copilot/{hosts,apps}.json` → `copilot`
+- `OPENROUTER_API_KEY` / `GH_TOKEN` / `GITHUB_TOKEN` env vars →
+  `openrouter` / `github`
+- Antigravity's app data dir → `antigravity` (local-only source)
 
 It never overwrites tokens you set manually, never touches sources you
 disabled, and never reads the Keychain. CLI auth files are re-read live, so
@@ -142,22 +149,27 @@ Thresholds live in `UsageBand.of(remainingPct:)` in
 
 ## Honesty section
 
-The Z.AI, Claude, and Codex endpoints are **not public APIs** — they're what
-each vendor's own dashboard/CLI calls, captured and pinned in
-[`plans/`](plans/). They work today and can change tomorrow; when they do,
-the affected source shows an error row instead of lying with stale numbers.
-QuotaBar reads only usage endpoints, stores everything locally
-(`~/.quotabar/`, 0600), and never writes to the CLIs' own credential files.
+The Z.AI, Claude, Codex, and Copilot endpoints are **not public APIs** —
+they're what each vendor's own dashboard/CLI/IDE calls, captured and pinned
+in [`plans/`](plans/). They work today and can change tomorrow; when they
+do, the affected source shows an error row instead of lying with stale
+numbers. Antigravity quota comes from the app's own local endpoint and only
+while the app runs; OpenRouter and GitHub use official APIs. QuotaBar reads
+only usage endpoints, stores everything locally (`~/.quotabar/`, 0600), and
+never writes to the CLIs' own credential files.
 
 ## Development
 
 ```sh
 swift build -c release
-.build/release/quotabar --demo                    # synthetic data, offline
-.build/release/quotabar --probe [zai|claude|codex]  # one live fetch, prints gauges
-.build/release/quotabar --parse testdata/payload_real.json     # offline parser checks
+.build/release/quotabar --demo        # synthetic data, offline
+.build/release/quotabar --probe [zai|claude|codex|copilot|openrouter|antigravity]
+.build/release/quotabar --parse testdata/payload_real.json        # offline parser checks
 .build/release/quotabar --parse-claude testdata/claude-usage.json
 .build/release/quotabar --parse-codex testdata/codex-usage.json
+.build/release/quotabar --parse-copilot testdata/copilot-user.json
+.build/release/quotabar --parse-openrouter testdata/openrouter-credits.json
+.build/release/quotabar --parse-antigravity testdata/antigravity-userstatus.json
 ```
 
 Project layout: `Sources/quotabar/` — one `enum XSource` per provider

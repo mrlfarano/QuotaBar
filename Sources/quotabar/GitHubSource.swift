@@ -6,11 +6,15 @@ import Foundation
 // the only source driving the status bar and the snapshot cache, so a
 // secondary source failing can never disturb the primary display.
 
+/// One provider's rendering unit. Sources never throw: failures land in
+/// `errorMessage`; `notice` carries non-error rows (e.g. "unlimited plan")
+/// that render without the warning glyph.
 struct SourceSection {
     var id: String          // "zai", "github", or a custom source id
     var title: String
     var gauges: [Gauge] = []
     var errorMessage: String? = nil
+    var notice: String? = nil
 }
 
 // MARK: - GitHub API rate limit

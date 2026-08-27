@@ -60,6 +60,9 @@ struct SourcesConfig: Codable {
     var custom: [CustomSourceConfig]? = nil
     var claude: OAuthSourceConfig? = nil
     var codex: OAuthSourceConfig? = nil
+    var openrouter: OAuthSourceConfig? = nil
+    var copilot: OAuthSourceConfig? = nil
+    var antigravity: OAuthSourceConfig? = nil
 }
 
 /// Credential holder for sources whose tokens come from CLI auth files

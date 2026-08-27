@@ -66,6 +66,51 @@ enum SourceDiscovery {
             outcome.lines.append("github: no GH_TOKEN/GITHUB_TOKEN in environment (60/hr unauthenticated is fine)")
         }
 
+        // Copilot — tokens other tools drop on disk (opencode, VS Code plugin).
+        // Content-checked: an auth file without a Copilot entry doesn't count.
+        if CopilotSource.hasStoredCredential() {
+            if ensureEntry(&config, \.copilot) {
+                outcome.lines.append("copilot: enabled (token read live from opencode/VS Code auth files)")
+                outcome.changed = true
+            } else {
+                outcome.lines.append("copilot: already configured")
+            }
+        } else {
+            outcome.lines.append("copilot: no Copilot sign-in found (opencode/VS Code auth files)")
+        }
+
+        // OpenRouter — key from environment.
+        if let key = env["OPENROUTER_API_KEY"], !key.isEmpty {
+            if config.sources == nil { config.sources = SourcesConfig() }
+            if let openrouter = config.sources?.openrouter {
+                if openrouter.token.isEmpty {
+                    config.sources?.openrouter?.token = key
+                    config.sources?.openrouter?.discovered = true
+                    outcome.lines.append("openrouter: key picked up from OPENROUTER_API_KEY")
+                    outcome.changed = true
+                } else {
+                    outcome.lines.append("openrouter: already configured")
+                }
+            }
+        } else {
+            outcome.lines.append("openrouter: no OPENROUTER_API_KEY in environment")
+        }
+
+        // Antigravity — the IDE's user data dir; the source is local-only
+        // (reads the running app's local RPC), so existence is all we need.
+        let antigravityDir = NSString(
+            string: "~/Library/Application Support/Antigravity").expandingTildeInPath
+        if FileManager.default.fileExists(atPath: antigravityDir) {
+            if ensureEntry(&config, \.antigravity) {
+                outcome.lines.append("antigravity: enabled (reads the app's local endpoint — open Antigravity to see quota)")
+                outcome.changed = true
+            } else {
+                outcome.lines.append("antigravity: already configured")
+            }
+        } else {
+            outcome.lines.append("antigravity: app not installed")
+        }
+
         return outcome
     }
 

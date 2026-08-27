@@ -20,8 +20,12 @@ response within a few days.
 This app's whole domain is third-party credentials, so reports in these
 areas are especially relevant:
 
-- Reads Claude Code (`~/.claude/.credentials.json`) and Codex
-  (`~/.codex/auth.json`) credential files; it must never write to them.
+- Reads Claude Code (`~/.claude/.credentials.json`), Codex
+  (`~/.codex/auth.json`), and opencode/VS Code Copilot auth files; it must
+  never write to them.
+- The Antigravity source talks only to that app's own local endpoint on
+  `127.0.0.1` (and reads its process arguments for the CSRF token); no
+  network traffic leaves the machine for it.
 - Stores tokens in `~/.quotabar/config.json` (owner-only, 0600).
 - Sends each provider's token **only to that provider's own usage endpoint**
   (see `plans/` for the pinned endpoints).
