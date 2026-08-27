@@ -1,4 +1,4 @@
-# barstats
+# QuotaBar
 
 A native macOS menu-bar app (no dependencies) that visualizes quota/usage
 information from external sources. First source: **Z.AI GLM Coding Plan**
@@ -28,7 +28,7 @@ Menu (click):
   Copy Raw Response
   Set Token…
   ─────────────────────────────
-  Quit barstats         ⌘Q
+  Quit QuotaBar         ⌘Q
 ```
 
 ## Color bands
@@ -47,17 +47,17 @@ an inner ring for the weekly quota, both filling clockwise in their band
 color. The text escalates with severity — countdown only when green, colored
 percent from yellow, warning glyph on red. Design previews live in
 `docs/design/`. Thresholds live in `UsageBand.of(remainingPct:)` in
-`Sources/barstats/Visualization.swift`.
+`Sources/quotabar/Visualization.swift`.
 
 ## Build & run
 
 ```sh
-scripts/make-app.sh                 # swift build -c release + build/BarStats.app
-open build/BarStats.app             # menu bar app (accessory, no Dock icon)
+scripts/make-app.sh                 # swift build -c release + build/QuotaBar.app
+open build/QuotaBar.app             # menu bar app (accessory, no Dock icon)
 
-.build/release/barstats --demo      # synthetic gauges, no network/token needed
-.build/release/barstats --probe     # fetch once, print parsed gauges + raw JSON
-.build/release/barstats --parse payload.json   # run the parser on a saved payload
+.build/release/quotabar --demo      # synthetic gauges, no network/token needed
+.build/release/quotabar --probe     # fetch once, print parsed gauges + raw JSON
+.build/release/quotabar --parse payload.json   # run the parser on a saved payload
 ```
 
 ## Launch at login
@@ -67,7 +67,7 @@ scripts/install-login.sh     # build, copy app to ~/Applications, install Launch
 scripts/uninstall-login.sh   # remove the agent (app stays in ~/Applications)
 ```
 
-The agent (`com.la.barstats`) starts the app at login with `RunAtLoad`;
+The agent (`com.la.quotabar`) starts the app at login with `RunAtLoad`;
 quitting the app keeps it quit until the next login.
 
 ## Providers
@@ -99,7 +99,7 @@ Built-ins:
         "title": "OpenRouter credits",
         "url": "https://openrouter.ai/api/v1/credits",
         "token": "sk-or-…",
-        "headers": { "X-Title": "barstats" },
+        "headers": { "X-Title": "quotabar" },
         "usedPath":  "data.usage",
         "limitPath": "data.limit",
         "resetPath": "data.reset_at"
@@ -130,12 +130,18 @@ Then use **Set Token…** in the app menu (it tests the token against the
 endpoint before saving), or write it manually:
 
 ```sh
-mkdir -p ~/.barstats
-printf '{"zaiToken":"YOUR_TOKEN"}\n' > ~/.barstats/config.json
-chmod 600 ~/.barstats/config.json
+mkdir -p ~/.quotabar
+printf '{"zaiToken":"YOUR_TOKEN"}\n' > ~/.quotabar/config.json
+chmod 600 ~/.quotabar/config.json
 ```
 
-or export `BARSTATS_ZAI_TOKEN` before launching. The client tries
+Upgrading from **barstats**? The config file moved — carry your token over:
+
+```sh
+mkdir -p ~/.quotabar && mv ~/.barstats/config.json ~/.quotabar/
+```
+
+or export `QUOTABAR_ZAI_TOKEN` before launching. The client tries
 `Authorization: Bearer <token>` first (what the dashboard sends) and falls
 back to the raw header, remembering whichever style the server accepted.
 
@@ -172,7 +178,7 @@ the shape ever changes. Sibling endpoints in the same module (not yet used):
 `/monitor/credit-usage/activity`.
 
 - Poll every `pollMinutes` (default 5); last snapshot cached in
-  `~/.barstats/last-snapshot.json` so relaunches show data immediately.
+  `~/.quotabar/last-snapshot.json` so relaunches show data immediately.
 - The 5-hour quota refreshes dynamically ~5h after consumption; weekly resets
   on a fixed day based on subscription start (docs.z.ai devpack overview/FAQ).
 

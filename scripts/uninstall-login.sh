@@ -1,8 +1,8 @@
 #!/bin/zsh
-# Remove the barstats LaunchAgent (leaves ~/Applications/BarStats.app alone).
+# Remove the quotabar LaunchAgent (leaves ~/Applications/QuotaBar.app alone).
 set -euo pipefail
 UID_NUM="$(id -u)"
-launchctl bootout "gui/${UID_NUM}/com.la.barstats" 2>/dev/null || true
-rm -f "$HOME/Library/LaunchAgents/com.la.barstats.plist"
-pkill -f "Applications/BarStats.app" 2>/dev/null || true
+launchctl bootout "gui/${UID_NUM}/com.la.quotabar" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.la.quotabar.plist"
+pkill -f "Applications/QuotaBar.app" 2>/dev/null || true
 echo "LaunchAgent removed (app left in ~/Applications)."

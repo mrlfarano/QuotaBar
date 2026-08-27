@@ -57,7 +57,7 @@ struct SourcesConfig: Codable {
     var custom: [CustomSourceConfig]? = nil
 }
 
-struct BarStatsConfig: Codable {
+struct QuotaBarConfig: Codable {
     var zaiToken: String = ""
     var authScheme: String?
     var baseURL: String = "https://api.z.ai"
@@ -70,8 +70,8 @@ struct BarStatsConfig: Codable {
     var mainSource: String? = nil
 }
 
-func resolvedToken(config: BarStatsConfig) -> String {
-    if let env = ProcessInfo.processInfo.environment["BARSTATS_ZAI_TOKEN"], !env.isEmpty {
+func resolvedToken(config: QuotaBarConfig) -> String {
+    if let env = ProcessInfo.processInfo.environment["QUOTABAR_ZAI_TOKEN"], !env.isEmpty {
         return env
     }
     return config.zaiToken
@@ -80,19 +80,19 @@ func resolvedToken(config: BarStatsConfig) -> String {
 enum ConfigStore {
     static var configFileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".barstats/config.json")
+            .appendingPathComponent(".quotabar/config.json")
     }
 
-    static func load() -> BarStatsConfig {
+    static func load() -> QuotaBarConfig {
         guard let data = try? Data(contentsOf: configFileURL),
               !data.isEmpty,
-              let decoded = try? JSONDecoder().decode(BarStatsConfig.self, from: data) else {
-            return BarStatsConfig()
+              let decoded = try? JSONDecoder().decode(QuotaBarConfig.self, from: data) else {
+            return QuotaBarConfig()
         }
         return decoded
     }
 
-    static func save(_ config: BarStatsConfig) {
+    static func save(_ config: QuotaBarConfig) {
         let directory = configFileURL.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -102,7 +102,7 @@ enum ConfigStore {
             try data.write(to: configFileURL, options: [.atomic])
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFileURL.path)
         } catch {
-            FileHandle.standardError.write(Data("barstats: failed saving config: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(Data("quotabar: failed saving config: \(error.localizedDescription)\n".utf8))
         }
     }
 }
@@ -118,14 +118,14 @@ enum ConfigStore {
 enum ZaiSource {
     static let quotaPath = "/api/monitor/usage/quota/limit"
 
-    static func fetchSnapshot(config: BarStatsConfig) async -> Snapshot {
+    static func fetchSnapshot(config: QuotaBarConfig) async -> Snapshot {
         let token = resolvedToken(config: config)
         guard !token.isEmpty else {
             return Snapshot(fetchedAt: Date(), rawJSON: "", gauges: [],
                             errorMessage: "No token configured — Set Token…", usedScheme: "")
         }
         let environment = ProcessInfo.processInfo.environment
-        let base = environment["BARSTATS_ZAI_BASE"] ?? config.baseURL
+        let base = environment["QUOTABAR_ZAI_BASE"] ?? config.baseURL
 
         var schemes: [String] = []
         if let remembered = config.authScheme { schemes.append(remembered) }

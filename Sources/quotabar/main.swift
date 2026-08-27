@@ -4,7 +4,7 @@ import AppKit
 
 let demoMode = CommandLine.arguments.contains("--demo")
 
-// Offline parser check: barstats --parse payload.json -> "fiveHour=42% week=14%"
+// Offline parser check: quotabar --parse payload.json -> "fiveHour=42% week=14%"
 if CommandLine.arguments.contains("--parse"), let file = CommandLine.arguments.last {
     if let data = FileManager.default.contents(atPath: file),
        let object = try? JSONSerialization.jsonObject(with: data),
@@ -22,11 +22,11 @@ if CommandLine.arguments.contains("--parse"), let file = CommandLine.arguments.l
         print(lines.joined(separator: " "))
         exit(gauges.isEmpty ? 1 : 0)
     }
-    FileHandle.standardError.write(Data("barstats --parse: could not read \(file)\n".utf8))
+    FileHandle.standardError.write(Data("quotabar --parse: could not read \(file)\n".utf8))
     exit(2)
 }
 
-// Offline custom-source check: barstats --parse-custom config.json payload.json
+// Offline custom-source check: quotabar --parse-custom config.json payload.json
 if CommandLine.arguments.contains("--parse-custom"), CommandLine.arguments.count >= 4 {
     func loadJSON(_ path: String) -> [String: Any]? {
         guard let data = FileManager.default.contents(atPath: path),
@@ -38,7 +38,7 @@ if CommandLine.arguments.contains("--parse-custom"), CommandLine.arguments.count
     let payloadPath = CommandLine.arguments[3]
     guard var sourceDict = loadJSON(configPath), let payload = loadJSON(payloadPath),
           (sourceDict["id"] as? String) != nil else {
-        FileHandle.standardError.write(Data("barstats --parse-custom: bad inputs\n".utf8))
+        FileHandle.standardError.write(Data("quotabar --parse-custom: bad inputs\n".utf8))
         exit(2)
     }
     if (sourceDict["title"] is String) == false { sourceDict["title"] = nil }
@@ -46,7 +46,7 @@ if CommandLine.arguments.contains("--parse-custom"), CommandLine.arguments.count
     sourceDict["limitPath"] = (sourceDict["limitPath"] as? String) ?? ""
     guard let encoded = try? JSONSerialization.data(withJSONObject: sourceDict),
           let source = try? JSONDecoder().decode(CustomSourceConfig.self, from: encoded) else {
-        FileHandle.standardError.write(Data("barstats --parse-custom: cannot decode\n".utf8))
+        FileHandle.standardError.write(Data("quotabar --parse-custom: cannot decode\n".utf8))
         exit(2)
     }
     let used = CustomSource.value(at: source.usedPath, in: payload)
@@ -68,7 +68,7 @@ app.setActivationPolicy(.accessory) // menu-bar only, no Dock icon
 if CommandLine.arguments.contains("--probe") {
     let config = ConfigStore.load()
     guard !resolvedToken(config: config).isEmpty else {
-        FileHandle.standardError.write(Data("barstats --probe: no token. Set BARSTATS_ZAI_TOKEN or ~/.barstats/config.json\n".utf8))
+        FileHandle.standardError.write(Data("quotabar --probe: no token. Set QUOTABAR_ZAI_TOKEN or ~/.quotabar/config.json\n".utf8))
         exit(2)
     }
     Task {
@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Created here so the accessory activation policy is already applied;
         // items created before it can fail to register with the system.
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "barstats…"
+        statusItem.button?.title = "quotabar…"
         menu.delegate = self
         statusItem.menu = menu
         loadCachedSnapshot()
@@ -216,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var cacheURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".barstats/last-snapshot.json")
+            .appendingPathComponent(".quotabar/last-snapshot.json")
     }
 
     private func saveCachedSnapshot(_ snap: Snapshot) {
@@ -245,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             return
         }
-        guard let snap = snapshot else { setTransient("barstats…"); return }
+        guard let snap = snapshot else { setTransient("quotabar…"); return }
         if let message = snap.errorMessage {
             setTransient(message.contains("token") || message.contains("Unauthorized")
                          ? "⚠︎ z.ai auth" : "⚠︎ z.ai")
@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit barstats", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit QuotaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
@@ -467,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
            (z.ai/manage-apikey/coding-plan/personal/usage)
         2. DevTools → Application → Local Storage → https://z.ai
         3. Copy the value of "z-ai-open-platform-token-production" and paste it here.
-        Stored locally in ~/.barstats/config.json with owner-only permissions.
+        Stored locally in ~/.quotabar/config.json with owner-only permissions.
         """
         let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
         field.placeholderString = "token / api key"

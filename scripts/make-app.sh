@@ -1,23 +1,23 @@
 #!/bin/zsh
-# Build build/BarStats.app — a double-clickable, LSUIElement menu-bar bundle.
+# Build build/QuotaBar.app — a double-clickable, LSUIElement menu-bar bundle.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 swift build -c release
 
-APP="build/BarStats.app"
+APP="build/QuotaBar.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp .build/release/barstats "$APP/Contents/MacOS/barstats"
+cp .build/release/quotabar "$APP/Contents/MacOS/quotabar"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key>          <string>com.la.barstats</string>
-    <key>CFBundleName</key>                <string>BarStats</string>
-    <key>CFBundleExecutable</key>          <string>barstats</string>
+    <key>CFBundleIdentifier</key>          <string>com.la.quotabar</string>
+    <key>CFBundleName</key>                <string>QuotaBar</string>
+    <key>CFBundleExecutable</key>          <string>quotabar</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
     <key>CFBundleShortVersionString</key>  <string>0.1.0</string>
     <key>LSUIElement</key>                 <true/>

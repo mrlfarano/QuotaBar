@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "barstats",
+    name: "quotabar",
     platforms: [
         .macOS(.v13)
     ],
     targets: [
         .executableTarget(
-            name: "barstats",
-            path: "Sources/barstats"
+            name: "quotabar",
+            path: "Sources/quotabar"
         )
     ]
 )
