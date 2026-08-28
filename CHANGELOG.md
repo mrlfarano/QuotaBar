@@ -4,6 +4,23 @@ All notable changes to QuotaBar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/)-ish (`MAJOR.MINOR` while pre-1.0).
 
+## [0.10.0] - 2026-08-27
+
+### Added
+
+- **CI on every push and pull request** — release build, all ten offline
+  `--parse-*` fixture checks, `swift test`, and the app-bundle build run on
+  `macos-15`; the README badge now tracks CI instead of the release workflow.
+- **App icon** — the status bar's dual-ring glyph rendered onto a dark tile
+  by `scripts/make-icon.sh`; bundled as `Resources/AppIcon.icns`, so released
+  builds stop showing the generic executable icon.
+- **Unit tests** — `Tests/quotabarTests/` (16 tests) covering the color-band
+  thresholds, the pinned and adaptive Z.AI parsers, tolerant leaf
+  conversions, epoch/ISO8601 reset parsing, custom-source dot paths, and
+  countdown formatting. `swift test` runs in CI; `shortReset`/`resetText`
+  take an injectable clock so countdown tests are deterministic.
+- README header shows the app icon.
+
 ## [0.9.0] - 2026-08-27
 
 ### Added
@@ -84,6 +101,7 @@ All notable changes to QuotaBar are documented here. The format follows
   response, token entry; launch-at-login framework and the generic source
   layer.
 
+[0.10.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/mrlfarano/QuotaBar/compare/91fac68...v0.8.0
 [0.7.0]: https://github.com/mrlfarano/QuotaBar/compare/v0.6...91fac68
