@@ -6,15 +6,101 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **An errored source no longer hijacks the status bar.** A failing Z.AI
+  token (or any selected source's error) now falls through to the next
+  healthy provider's rings; the warning only takes over when nothing is
+  healthy — and then it names the failing source. The README's fallback
+  promise now holds for error states, not just empty ones.
+- **Settings changes landing mid-refresh are no longer dropped.** Pasting a
+  key while a fetch was in flight left it unfetched until the next poll
+  (up to `pollMinutes`); refreshes now re-run when one arrives mid-flight.
+- **An open menu is no longer dismissed by background updates.** Repainting
+  the status item while its menu tracked (demo tick, a refresh completing
+  mid-menu) canceled the popup; repaints now defer until the menu closes.
+- **Pasted keys are no longer lost when the menu closes.** Menu tracking can
+  swallow Return and closing the menu (or Escape) tears a key field down
+  without an end-editing event — a pasted token silently vanished. Pending
+  key edits are now committed the moment the menu closes (found live during
+  the 0.11.0 build pass: a real paste never reached the config).
+- **Key entry moved out of the menu into a standard editor window.** Text
+  fields inside a tracking NSMenu never get a field editor — the menu
+  window refuses key status even with the app active, so clicking a key
+  field showed no caret and typing/paste went nowhere (reported live).
+  Settings ▸ now has **Paste API Keys…**, a small editor with all three
+  fields: real caret and paste, Return saves, Escape cancels, empty keeps,
+  × removes. The commit-on-close sweep from the previous fix was retired
+  with the menu fields it guarded.
+
 ### Added
 
-- **Settings…** (⌘,) — configure the app from the UI: poll cadence and
-  per-source on/off toggles, applied live and saved through the same 0600
-  config file. Toggling a source never touches its stored credentials or
-  discovery state; **Open config.json…** opens the JSON for the
-  JSON-only parts (custom sources, tokens).
+- **Z.AI token discovery** — Discover Sources (and the launch scan) now
+  finds the z.ai dashboard token where it already lives: browser
+  localStorage. Chromium-family browsers are read from their on-disk
+  LevelDB (Chrome, Canary, Chromium, Brave, Edge, Arc, Comet — ASCII and
+  UTF-16LE records), Firefox from its per-profile SQLite. Also picks up
+  the Claude Code bridge (`ANTHROPIC_BASE_URL` on z.ai →
+  `ANTHROPIC_AUTH_TOKEN`; real Anthropic tokens are never touched).
+  Safari's storage is TCC-protected and deliberately skipped — reading it
+  would prompt for Full Disk Access. Only fills an empty slot; user-set
+  tokens are never overwritten.
+- **Z.AI is toggleable** like every other source — the app is fully usable
+  with no Z.AI account at all. `sources.zai` absent means enabled (old
+  configs decode unchanged); toggling never touches the stored token.
+- **Per-source status lines** under the settings checkboxes — a fetch
+  error (first sentence, 40-char cap), a notice, or a waiting hint; healthy
+  and disabled sources stay silent.
+- **Key clearing** — a × button on key fields with a stored value removes
+  the credential outright (empty field still means "keep").
+- **Settings… ▸ submenu** (⌘,) and **Status Bar Source ▸** — settings left
+  the flat menu so a full provider list can't overflow the screen (menus
+  don't scroll) and sits where people expect it.
+- **Countdown disambiguation** — status-bar countdowns now carry a ↻ glyph
+  (`↻9h24m` = resets in 9h24m, not "9h24m of quota left"); red bands always
+  show the ⚠︎, with or without a countdown.
+- **Colorblind-safe critical state** — a filled center dot joins the red
+  ring, a shape channel alongside color.
+- **VoiceOver labels** on gauge rows (readable summaries instead of block
+  characters), and the status-item tooltip now carries the ring legend and
+  per-gauge "% left".
+- Long section titles, errors, and notices truncate (48 chars; 36 in the
+  picker) so one verbose custom source can't stretch the panel; gauge-label
+  alignment adapts to the longest current label. Poll cadences outside the
+  presets render as their own radio instead of nothing-selected.
+- **Inline settings in the dropdown** — poll cadence (radio row), per-source
+  on/off checkboxes, and the directly pasted keys (Z.AI, GitHub, OpenRouter)
+  live in the status-item menu itself; there is no separate settings window.
+  The menu stays open while you adjust, every change applies live (saved to
+  the same 0600 config, sources refresh immediately), and the data rows
+  catch up once the menu closes. Stored keys display masked (`********` +
+  the last 5 characters, fixed star count so the length never leaks);
+  clicking a field clears it for a fresh paste, leaving it empty keeps the
+  stored value, and changing the Z.AI key re-probes the Authorization header
+  styles. **Open config.json…** stays for the JSON-only parts (custom
+  sources, OAuth-managed tokens).
+- **Windows port** (`windows/`) — the same sources, parsers, config file,
+  discovery rules, color bands, and dual-ring glyph as a Windows
+  system-tray app (Electron; native tray menus, runtime-generated glyphs).
+  Offline `--parse*` output is byte-identical to the macOS binary on the
+  shared fixtures; unit tests ported to `node --test`; `npm run package:win`
+  builds `QuotaBar.exe` from any OS. Tray icons being icon-only on Windows,
+  the escalating numbers live in the live tooltip instead of beside the
+  glyph. *Known parity gap: the Windows tray still has the old
+  error-overrides-rings status logic and no Z.AI toggle — macOS fixes from
+  this release land there in a follow-up.*
 - Version row in the menu footer ("QuotaBar v0.10.0"; "(dev build)" when run
   from source without a bundle).
+
+### Removed
+
+- The **Settings…** window (⌘,) — its poll, source, and key fields moved
+  into the dropdown's settings rows.
+- The **Set Token…** menu item — key entry lives in the menu's key fields
+  now, with the z.ai instructions kept in the key field's tooltip. A
+  rejected key surfaces as ⚠︎ z.ai auth instead of a modal alert.
+- Bare-letter menu shortcuts (R, D, Q) — they would fire while typing in the
+  inline key fields; Refresh, Discover, and Quit now require ⌘.
 
 ## [0.10.0] - 2026-08-27
 

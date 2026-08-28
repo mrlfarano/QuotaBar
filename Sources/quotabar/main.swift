@@ -165,8 +165,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var config = ConfigStore.load()
     private var snapshot: Snapshot?
     private var sections: [SourceSection] = []
-    private var settingsController: SettingsWindowController?
-    private var refreshing = false
+    private var settingsPanel: InlineSettingsPanel?
+    private let refreshCoordinator = RefreshCoordinator()
+    /// When the last refresh cycle finished; drives the "Updated" row so it
+    /// stays meaningful even with the z.ai source disabled.
+    private var lastRefreshAt: Date?
+    private var menuIsOpen = false
+    private var menuRebuildPending = false
     private let demoMode: Bool
     private var demoGauges: [Gauge] = [
         Gauge(id: "fiveHour", label: "5-hour window", pct: 24, used: 28_800, total: 120_000,
@@ -216,8 +221,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rebuild(reason: "demo-tick")
             return
         }
-        guard let snap = snapshot else { Task { @MainActor in await refreshNow() }; return }
-        let age = Date().timeIntervalSince(snap.fetchedAt)
+        guard let fetched = lastRefreshAt else { Task { @MainActor in await refreshNow() }; return }
+        let age = Date().timeIntervalSince(fetched)
         if age >= Double(normalizedPollMinutes(config.pollMinutes)) * 60 {
             Task { @MainActor in await refreshNow() }
         }
@@ -247,10 +252,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor private func refreshNow() async {
-        guard !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
-        if !demoMode {
+        // A request arriving mid-flight (e.g. a settings change) re-runs the
+        // cycle instead of being dropped.
+        guard refreshCoordinator.begin() else { return }
+        defer {
+            lastRefreshAt = Date()
+            if refreshCoordinator.end() {
+                Task { @MainActor in await self.refreshNow() }
+            }
+        }
+        if !demoMode, !menuIsOpen {
             setTransient("…sync")
         }
         if demoMode {
@@ -267,14 +278,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        async let zaiSnap = ZaiSource.fetchSnapshot(config: config)
         var built: [SourceSection] = []
-        let zai = await zaiSnap
-        let host = URL(string: config.baseURL)?.host ?? config.baseURL
-        let level = zai.planLevel.map { " (\($0))" } ?? ""
-        built.append(SourceSection(id: "zai", title: "Z.AI Coding Plan\(level) · \(host)",
-                                   gauges: zai.gauges,
-                                   errorMessage: zai.errorMessage))
+        var zaiResult: Snapshot?
+        if SettingsLogic.isSourceEnabled(config, id: "zai") {
+            let zai = await ZaiSource.fetchSnapshot(config: config)
+            zaiResult = zai
+            let host = URL(string: config.baseURL)?.host ?? config.baseURL
+            let level = zai.planLevel.map { " (\($0))" } ?? ""
+            built.append(SourceSection(id: "zai", title: "Z.AI Coding Plan\(level) · \(host)",
+                                       gauges: zai.gauges,
+                                       errorMessage: zai.errorMessage))
+        }
         if config.sources?.github?.enabled ?? true {
             built.append(await GitHubSource.fetch(token: config.sources?.github?.token))
         }
@@ -301,7 +315,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             built.append(await CustomSource.fetch(custom))
         }
         sections = built
-        applySnapshot(zai)
+        if let zai = zaiResult {
+            applySnapshot(zai)
+        } else {
+            rebuild(reason: "applied")
+        }
     }
 
     @MainActor private func applySnapshot(_ snap: Snapshot) {
@@ -330,53 +348,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func loadCachedSnapshot() {
         guard !demoMode,
+              SettingsLogic.isSourceEnabled(config, id: "zai"),
               let data = try? Data(contentsOf: cacheURL),
               let snap = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
         snapshot = snap
+        lastRefreshAt = snap.fetchedAt
     }
 
     // MARK: rendering
 
-    /// Paint the status item: concentric dual-ring glyph + escalating text
-    /// (green = countdown only; yellow/red add the colored percent).
+    /// Paint the status item from the resolver's decision: the selected
+    /// source's rings, a healthy fallback's rings (an errored selection no
+    /// longer hijacks the bar), a short error, or startup idle text.
     private func updateStatusItem() {
         if demoMode {
             if let snap = snapshot, snap.gauges.contains(where: { $0.id == "fiveHour" }) {
-                applyGlyph(snap: snap, demo: true)
+                applyGlyph(gauges: snap.gauges, demo: true)
             } else {
                 setTransient("Z·demo")
             }
             return
         }
-        guard let snap = snapshot else { setTransient("quotabar…"); return }
-        if let message = snap.errorMessage {
-            setTransient(message.contains("token") || message.contains("Unauthorized")
-                         ? "⚠︎ z.ai auth" : "⚠︎ z.ai")
-            return
+        switch StatusDisplayResolver.resolve(sections: sections,
+                                             zaiSnapshot: snapshot,
+                                             mainSource: config.mainSource) {
+        case .gauges(let gauges):
+            applyGlyph(gauges: gauges, demo: false)
+        case .error(let text), .idle(let text):
+            setTransient(text)
         }
-        guard snap.gauges.contains(where: { $0.id == "fiveHour" || $0.id == "week" }) else {
-            setTransient("z.ai")
-            return
-        }
-        applyGlyph(snap: snap, demo: false)
     }
 
-    /// Gauges driving the status bar: the source selected by config.mainSource
-    /// (or "zai" default), falling back to z.ai, then any healthy section.
-    private var statusGauges: [Gauge]? {
-        let wanted = (config.mainSource ?? "zai").lowercased()
-        if let match = sections.first(where: { $0.id == wanted && !$0.gauges.isEmpty }) {
-            return match.gauges
-        }
-        if let zai = sections.first(where: { $0.id == "zai" && !$0.gauges.isEmpty }) {
-            return zai.gauges
-        }
-        return sections.first(where: { !$0.gauges.isEmpty })?.gauges
-    }
-
-    private func applyGlyph(snap: Snapshot, demo: Bool) {
+    private func applyGlyph(gauges: [Gauge], demo: Bool) {
         guard let button = statusItem.button else { return }
-        let gauges = demo ? snap.gauges : statusGauges ?? snap.gauges
         guard !gauges.isEmpty else { setTransient("⚠︎ no data"); return }
         let primary = gauges[0]
         let secondary = gauges.count > 1 ? gauges[1] : nil
@@ -385,9 +389,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                      weekRemaining: secondary?.remainingPct,
                                      weekBand: secondary?.band)
         button.attributedTitle = escalationTitle(for: primary, demo: demo)
-        var tip = "Z.AI Coding Plan"
+        var tip = "QuotaBar — outer ring = 5-hour window · inner ring = weekly limit"
         for gauge in gauges {
-            tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used"
+            tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left"
             if let used = gauge.used, let total = gauge.total {
                 tip += " (\(compactCount(used))/\(compactCount(total)) tokens)"
             }
@@ -396,21 +400,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = tip
     }
 
-    /// Escalating text: calm when green, numbers when it matters.
+    /// Escalating text (string spec lives in EscalationText, unit-tested):
+    /// calm when green, numbers when it matters, ↻ marking reset countdowns.
     private func escalationTitle(for gauge: Gauge, demo: Bool) -> NSAttributedString {
         let composed = NSMutableAttributedString()
         let remaining = Int(gauge.remainingPct.rounded())
         let short = shortReset(gauge.resetAt)
         switch gauge.band {
         case .green:
-            composed.append(StatusText.run(short ?? "\(remaining)%",
+            composed.append(StatusText.run(short.map { "↻\($0)" } ?? "\(remaining)%",
                                            color: .labelColor))
         case .yellow, .red:
             composed.append(StatusText.run("\(remaining)%", color: gauge.band.color,
                                            font: StatusText.emphasis))
             if let short {
                 let warning = gauge.band == .red ? " ⚠︎" : ""
-                composed.append(StatusText.run(" · \(short)\(warning)",
+                composed.append(StatusText.run(" · ↻\(short)\(warning)",
                                                color: .labelColor))
             }
         }
@@ -432,9 +437,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: menu
 
-    /// Recompute every menu row from current state. Called on updates; the
-    /// menu is closed whenever this runs, so rebuilding from scratch is safe.
+    /// Recompute every menu row from current state. Called on updates. While
+    /// the menu is open, mutating items would cancel the popup (and destroy
+    /// any in-progress key edit) — and so would repainting the status item
+    /// itself — so everything is deferred to menuDidClose.
     private func rebuild(reason: String) {
+        if menuIsOpen {
+            menuRebuildPending = true
+            return
+        }
         updateStatusItem()
 
         menu.removeAllItems()
@@ -442,25 +453,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if sections.isEmpty {
             menu.addItem(disabledItem("No data yet"))
         }
+        // Longest gauge label across sections, so every bar row aligns even
+        // with verbose custom-source labels (floor: the original 13).
+        let labelWidth = max(13, sections.flatMap { $0.gauges.map(\.label.count) }.max() ?? 13)
         for section in sections {
-            menu.addItem(disabledItem(section.title))
+            menu.addItem(disabledItem(truncated(section.title)))
             if let message = section.errorMessage {
-                menu.addItem(disabledItem("⚠︎ \(message)"))
+                menu.addItem(disabledItem("⚠︎ " + truncated(message)))
             } else if section.gauges.isEmpty {
                 menu.addItem(disabledItem("Waiting for data"))
             }
             if let notice = section.notice {
-                menu.addItem(disabledItem(notice))
+                menu.addItem(disabledItem(truncated(notice)))
             }
             for gauge in section.gauges {
                 let menuFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
                 let row = NSMutableAttributedString()
-                row.append(StatusText.run(gauge.label.pad(toWidth: 13) + "  ",
+                row.append(StatusText.run(gauge.label.pad(toWidth: labelWidth) + "  ",
                                           color: .secondaryLabelColor, font: menuFont))
                 row.append(coloredBlocks(pct: gauge.pct, band: gauge.band))
                 row.append(StatusText.run("  \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left",
                                           color: gauge.band.color, font: menuFont))
-                menu.addItem(attributedDisabledItem(row))
+                menu.addItem(accessibleGaugeItem(row, section: section, gauge: gauge))
 
                 var detail = ""
                 if let used = gauge.used, let total = gauge.total, total > 0 {
@@ -478,29 +492,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             menu.addItem(.separator())
         }
-        if snapshot != nil {
+        if lastRefreshAt != nil {
             let updatedRow = disabledItem("Updated —")
             updatedRow.representedObject = "updated-row"
             menu.addItem(updatedRow)
         }
 
-        // Status-bar source picker: every section that currently has data.
+        // Status-bar source picker: every section that currently has data,
+        // in a submenu so a full provider list doesn't stretch the panel.
         let healthyIds = sections.filter { !$0.gauges.isEmpty }.map { $0.id }
         if healthyIds.count > 1 {
-            menu.addItem(disabledItem("Status Bar Source:"))
+            let pickerMenu = NSMenu()
             let active = (config.mainSource ?? "zai").lowercased()
             for id in healthyIds {
-                let name = sections.first(where: { $0.id == id })?.title ?? id
+                let name = truncated(sections.first(where: { $0.id == id })?.title ?? id, max: 36)
                 let item = NSMenuItem(title: name, action: #selector(selectMainSource(_:)), keyEquivalent: "")
                 item.representedObject = id
                 item.target = self
                 item.state = id == active ? .on : .off
-                menu.addItem(item)
+                pickerMenu.addItem(item)
             }
+            let picker = NSMenuItem(title: "Status Bar Source", action: nil, keyEquivalent: "")
+            picker.submenu = pickerMenu
+            menu.addItem(picker)
             menu.addItem(.separator())
         }
 
+        // Bare-letter equivalents would fire while typing in the inline key
+        // fields, so the menu shortcuts require ⌘.
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshMenuItem(_:)), keyEquivalent: "r")
+        refreshItem.keyEquivalentModifierMask = .command
         refreshItem.target = self
         menu.addItem(refreshItem)
 
@@ -511,21 +532,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if !demoMode {
-            let token = NSMenuItem(title: "Set Token…", action: #selector(setToken(_:)), keyEquivalent: "")
-            token.target = self
-            menu.addItem(token)
             let discover = NSMenuItem(title: "Discover Sources", action: #selector(discoverSources(_:)), keyEquivalent: "d")
+            discover.keyEquivalentModifierMask = .command
             discover.target = self
             menu.addItem(discover)
-            let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
-            settings.target = self
+            menu.addItem(.separator())
+
+            // Settings live in their own submenu: the data menu stays short
+            // (menus don't scroll) and "Settings…" is where people look.
+            // Key entry opens a standard editor window (see the panel) —
+            // menus can't host text editing.
+            let settingsMenu = NSMenu()
+            let panel = InlineSettingsPanel(config: config, sections: sections)
+            settingsPanel = panel // controls hold targets unowned; keep alive
+            panel.onApply = { [weak self] updated in
+                guard let self else { return }
+                self.config = updated
+                ConfigStore.save(updated)
+                self.updateStatusItem()
+                self.rebuild(reason: "settings")
+                Task { @MainActor in await self.refreshNow() }
+            }
+            for item in panel.items() { settingsMenu.addItem(item) }
+            let settings = NSMenuItem(title: "Settings…", action: nil, keyEquivalent: ",")
+            settings.keyEquivalentModifierMask = .command
+            settings.submenu = settingsMenu
             menu.addItem(settings)
         }
 
         menu.addItem(.separator())
         menu.addItem(disabledItem(appVersionLabel()))
         let quit = NSMenuItem(title: "Quit QuotaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.keyEquivalentModifierMask = .command
         menu.addItem(quit)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        menuIsOpen = true
+        menuRebuildPending = false
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsOpen = false
+        guard menuRebuildPending else { return }
+        menuRebuildPending = false
+        rebuild(reason: "menu-closed")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -534,9 +585,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         for item in menu.items where item.representedObject as? String == "updated-row" {
-            if let snap = snapshot {
-                let age = Int(Date().timeIntervalSince(snap.fetchedAt) / 60)
-                item.title = "Updated \(formatter.string(from: snap.fetchedAt)) (\(age <= 0 ? "just now" : "\(age)m ago")), poll \(config.pollMinutes)m"
+            if let fetched = lastRefreshAt {
+                let age = Int(Date().timeIntervalSince(fetched) / 60)
+                item.title = "Updated \(formatter.string(from: fetched)) (\(age <= 0 ? "just now" : "\(age)m ago")), poll \(config.pollMinutes)m"
             } else {
                 item.title = "No data yet"
             }
@@ -546,6 +597,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func attributedDisabledItem(_ attributed: NSAttributedString) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         item.attributedTitle = attributed
+        item.isEnabled = false
+        return item
+    }
+
+    /// Gauge rows carry a readable summary for VoiceOver — the visible bar
+    /// characters would otherwise be read one block at a time. NSMenuItem
+    /// has no native label property, so the subclass overrides the
+    /// accessibility getter.
+    private func accessibleGaugeItem(_ attributed: NSAttributedString,
+                                     section: SourceSection, gauge: Gauge) -> NSMenuItem {
+        let item = AccessibleMenuItem(attributed: attributed)
+        let sectionName = section.title.split(separator: "·").first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? section.title
+        var label = "\(sectionName), \(gauge.label)"
+        label += ": \(Int(gauge.pct.rounded()))% used, \(Int(gauge.remainingPct.rounded()))% left"
+        if let reset = resetText(gauge.resetAt) { label += ", \(reset)" }
+        item.accessibilitySummary = label
         item.isEnabled = false
         return item
     }
@@ -585,69 +653,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
+}
 
-    /// Settings window: shared instance so reopening re-syncs to the live
-    /// config instead of showing stale controls.
-    @objc private func openSettings(_ sender: Any?) {
-        if let settingsController {
-            settingsController.refresh(from: config)
-            settingsController.showWindow(nil)
-        } else {
-            let controller = SettingsWindowController(config: config)
-            controller.onApply = { [weak self] updated in
-                guard let self else { return }
-                self.config = updated
-                self.rebuild(reason: "settings")
-                Task { @MainActor in await self.refreshNow() }
-            }
-            settingsController = controller
-            controller.showWindow(nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
+// MARK: - Accessibility
+
+/// NSMenuItem exposes no accessibilityLabel property; overriding the
+/// protocol getter lets VoiceOver read a summary instead of the visible
+/// block characters. Best-effort — verified with Accessibility Inspector;
+/// if a macOS build ignores it, the plain-text detail row below each gauge
+/// still carries the numbers.
+final class AccessibleMenuItem: NSMenuItem {
+
+    var accessibilitySummary: String = ""
+
+    init(attributed: NSAttributedString) {
+        super.init(title: "", action: nil, keyEquivalent: "")
+        attributedTitle = attributed
     }
 
-    @objc private func setToken(_ sender: Any?) {
-        let alert = NSAlert()
-        alert.messageText = "Z.AI credential for usage queries"
-        alert.informativeText = """
-        Get the token the z.ai dashboard itself uses:
-        1. Sign in at z.ai and open the usage page
-           (z.ai/manage-apikey/coding-plan/personal/usage)
-        2. DevTools → Application → Local Storage → https://z.ai
-        3. Copy the value of "z-ai-open-platform-token-production" and paste it here.
-        Stored locally in ~/.quotabar/config.json with owner-only permissions.
-        """
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
-        field.placeholderString = "token / api key"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Save & Test")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let candidate = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty else { return }
-
-        setTransient("…checking token")
-        Task { @MainActor in
-            var trial = config
-            trial.zaiToken = candidate
-            trial.authScheme = nil
-            let snap = await ZaiSource.fetchSnapshot(config: trial)
-            if snap.errorMessage?.lowercased().contains("authoriz") == true
-                || snap.errorMessage?.lowercased().contains("token") == true {
-                let fail = NSAlert()
-                fail.messageText = "Token rejected"
-                fail.informativeText = snap.errorMessage ?? "Authorization failed."
-                fail.runModal()
-                rebuild(reason: "token-rejected")
-                return
-            }
-            config = trial
-            config.authScheme = snap.usedScheme
-            ConfigStore.save(config)
-            applySnapshot(snap)
-        }
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        super.init(coder: coder)
     }
+
+    override func accessibilityLabel() -> String? { accessibilitySummary }
 }
 
 // MARK: - Formatting helpers
@@ -656,6 +685,13 @@ extension String {
     func pad(toWidth width: Int) -> String {
         count >= width ? self : padding(toLength: width, withPad: " ", startingAt: 0)
     }
+}
+
+/// Cap long single-line menu text — NSMenu sizes the panel to its widest
+/// item, so one verbose custom-source title must not stretch everything.
+func truncated(_ text: String, max: Int = 48) -> String {
+    guard text.count > max else { return text }
+    return String(text.prefix(max - 1)).trimmingCharacters(in: .whitespaces) + "…"
 }
 
 func compactCount(_ value: Double) -> String {

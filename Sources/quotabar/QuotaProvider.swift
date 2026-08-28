@@ -2,12 +2,12 @@ import Foundation
 
 // MARK: - Model
 
-struct DetailEntry: Codable {
+struct DetailEntry: Codable, Equatable {
     var modelCode: String
     var usage: Double
 }
 
-struct Gauge: Codable {
+struct Gauge: Codable, Equatable {
     var id: String          // "fiveHour", "week", or "mcp"
     var label: String
     var pct: Double         // 0...100
@@ -56,6 +56,10 @@ struct CustomSourceConfig: Codable {
 }
 
 struct SourcesConfig: Codable {
+    /// Z.AI's on/off switch (its token lives at the top level, `zaiToken`).
+    /// Absent ⇒ enabled, so configs written before the toggle existed keep
+    /// polling Z.AI.
+    var zai: OAuthSourceConfig? = nil
     var github: GitHubSourceConfig? = GitHubSourceConfig()
     var custom: [CustomSourceConfig]? = nil
     var claude: OAuthSourceConfig? = nil
@@ -148,7 +152,7 @@ enum ZaiSource {
         let token = resolvedToken(config: config)
         guard !token.isEmpty else {
             return Snapshot(fetchedAt: Date(), rawJSON: "", gauges: [],
-                            errorMessage: "No token configured — Set Token…", usedScheme: "")
+                            errorMessage: "No token — paste it in the menu's key fields", usedScheme: "")
         }
         let environment = ProcessInfo.processInfo.environment
         let base = environment["QUOTABAR_ZAI_BASE"] ?? config.baseURL
