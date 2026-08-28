@@ -68,35 +68,12 @@ final class InlinePanelTests: XCTestCase {
         XCTAssertFalse(othersOn, "selecting one radio must clear the others")
     }
 
-    func testKeyFieldSavesAndReMasks() {
-        var config = QuotaBarConfig()
-        config.zaiToken = "existing-token-abcde"
-        let panel = InlineSettingsPanel(config: config)
-        var applied: [QuotaBarConfig] = []
-        panel.onApply = { applied.append($0) }
-
-        let field = findTextFields(in: allViews(of: panel)[2], id: "zai").first
-        XCTAssertNotNil(field, "Z.AI key field missing")
-        XCTAssertEqual(field?.stringValue, "********abcde", "field starts masked")
-
-        // Fresh paste: entering clears, a candidate is stored re-masked.
-        panel.controlTextDidBeginEditing(
-            Notification(name: NSControl.textDidBeginEditingNotification, object: field!))
-        XCTAssertEqual(field?.stringValue, "")
-        field?.stringValue = " brand new key "
-        panel.controlTextDidEndEditing(
-            Notification(name: NSControl.textDidEndEditingNotification, object: field!))
-        XCTAssertEqual(applied.last?.zaiToken, "brand new key")
-        XCTAssertNil(applied.last?.authScheme, "new Z.AI key must re-probe header styles")
-        XCTAssertEqual(field?.stringValue, "********w key", "re-masked after save")
-
-        // Leaving the field empty restores the stored value untouched.
-        panel.controlTextDidBeginEditing(
-            Notification(name: NSControl.textDidBeginEditingNotification, object: field!))
-        panel.controlTextDidEndEditing(
-            Notification(name: NSControl.textDidEndEditingNotification, object: field!))
-        XCTAssertEqual(applied.last?.zaiToken, "brand new key", "empty entry keeps the stored key")
-        XCTAssertEqual(applied.count, 1, "no spurious apply for the empty round-trip")
+    func testKeyEditingLivesInTheAlertEditorNotTheMenu() {
+        // Menu rows no longer host NSTextFields (no caret in a tracking
+        // menu) — only the poll row, sources grid, and action items remain.
+        let panel = InlineSettingsPanel(config: QuotaBarConfig())
+        let allFields = allViews(of: panel).flatMap { findTextFields(in: $0, id: "zai") }
+        XCTAssertTrue(allFields.isEmpty, "no editable key fields in the menu rows")
     }
 
     func testItemsIncludeOpenConfigAction() {
@@ -106,7 +83,14 @@ final class InlinePanelTests: XCTestCase {
         XCTAssertNotNil(openConfig?.target)
     }
 
-    // MARK: clear-key buttons
+    func testItemsIncludePasteKeysEditor() {
+        let panel = InlineSettingsPanel(config: QuotaBarConfig())
+        let pasteKeys = panel.items().first(where: { $0.title == "Paste API Keys…" })
+        XCTAssertNotNil(pasteKeys, "key entry lives in the Paste API Keys editor")
+        XCTAssertNotNil(pasteKeys?.target)
+    }
+
+    // MARK: key editing (Paste API Keys editor)
 
     private func findLabels(in view: NSView, containing text: String) -> [NSTextField] {
         var found: [NSTextField] = []
@@ -120,25 +104,58 @@ final class InlinePanelTests: XCTestCase {
         return found
     }
 
-    func testClearKeyButtonRemovesStoredKey() {
-        var config = QuotaBarConfig()
-        config.zaiToken = "stored-key-abcde"
-        let panel = InlineSettingsPanel(config: config)
-        var applied: [QuotaBarConfig] = []
-        panel.onApply = { applied.append($0) }
-
-        let clear = findButtons(in: allViews(of: panel)[2], id: "zai").first
-        XCTAssertNotNil(clear, "a stored key gets the × clear button")
-
-        NSApp.sendAction(clear!.action!, to: clear!.target, from: clear!)
-        XCTAssertEqual(applied.count, 1)
-        XCTAssertEqual(applied[0].zaiToken, "", "× removes the key outright")
+    func testResolveKeyEditSetKeepClear() {
+        XCTAssertEqual(SettingsLogic.resolveKeyEdit(current: "old-key-abcde",
+                                                    fieldText: "brand-new-key-1",
+                                                    clearRequested: false), .set("brand-new-key-1"))
+        XCTAssertEqual(SettingsLogic.resolveKeyEdit(current: "old-key-abcde",
+                                                    fieldText: "  brand-new-key-1  ",
+                                                    clearRequested: false), .set("brand-new-key-1"),
+                       "pasted whitespace is trimmed")
+        XCTAssertEqual(SettingsLogic.resolveKeyEdit(current: "old-key-abcde",
+                                                    fieldText: "",
+                                                    clearRequested: false), .keep,
+                       "empty keeps the stored key")
+        XCTAssertEqual(SettingsLogic.resolveKeyEdit(current: "old-key-abcde",
+                                                    fieldText: "********abcde",
+                                                    clearRequested: false), .keep,
+                       "an untouched mask keeps the stored key")
+        XCTAssertEqual(SettingsLogic.resolveKeyEdit(current: "old-key-abcde",
+                                                    fieldText: "anything",
+                                                    clearRequested: true), .clear,
+                       "the × button overrides the field text")
+        XCTAssertEqual(SettingsLogic.resolveKeyEdit(current: "",
+                                                    fieldText: "",
+                                                    clearRequested: false), .keep)
     }
 
-    func testClearKeyButtonAbsentWithoutStoredKey() {
-        let panel = InlineSettingsPanel(config: QuotaBarConfig())
-        XCTAssertNil(findButtons(in: allViews(of: panel)[2], id: "zai").first,
-                     "nothing to clear — no button")
+    private func field(_ id: String, _ text: String) -> (String, NSTextField) {
+        (id, NSTextField(string: text))
+    }
+
+    func testUpdatedConfigAppliesEveryKindOfEdit() {
+        var config = QuotaBarConfig()
+        config.zaiToken = "old-zai-abcde"
+        config = SettingsLogic.setKey(config, id: "github", key: "gh-old-key-12345")
+        let panel = InlineSettingsPanel(config: config)
+
+        let updated = panel.updatedConfig(fields: [
+            field("zai", "********abcde"),          // mask untouched, but × pressed
+            field("github", "gh-fresh-98765"),       // replacement
+            field("openrouter", "sk-or-v1-fresh-1"), // new key
+        ].reduce(into: [String: NSTextField]()) { $0[$1.0] = $1.1 }, clears: ["zai"])
+
+        XCTAssertNotNil(updated)
+        XCTAssertEqual(updated?.zaiToken, "", "× wins over the untouched mask")
+        XCTAssertEqual(updated?.sources?.github?.token, "gh-fresh-98765")
+        XCTAssertEqual(updated?.sources?.openrouter?.token, "sk-or-v1-fresh-1")
+        XCTAssertNil(updated?.authScheme, "a changed Z.AI key re-probes header styles")
+
+        // Nothing changed → nil.
+        XCTAssertNil(InlineSettingsPanel(config: QuotaBarConfig()).updatedConfig(
+            fields: [field("zai", ""), field("github", ""), field("openrouter", "")]
+                .reduce(into: [String: NSTextField]()) { $0[$1.0] = $1.1 },
+            clears: []))
     }
 
     // MARK: poll cadence
@@ -171,45 +188,5 @@ final class InlinePanelTests: XCTestCase {
         XCTAssertFalse(findLabels(in: allViews(of: panel)[1],
                                   containing: "run `claude` once").isEmpty,
                        "the settings grid carries the short error")
-    }
-
-    // MARK: commit-on-menu-close (pastes survive Return being swallowed)
-
-    func testPendingKeyEditCommitsOnMenuClose() {
-        var config = QuotaBarConfig()
-        config.zaiToken = "old-token-abcde"
-        let panel = InlineSettingsPanel(config: config)
-        var applied: [QuotaBarConfig] = []
-        panel.onApply = { applied.append($0) }
-
-        let field = findTextFields(in: allViews(of: panel)[2], id: "zai").first!
-        // User enters the field (mask clears), pastes, and the menu closes
-        // with NO end-editing event — Return swallowed or Escape teardown.
-        panel.controlTextDidBeginEditing(
-            Notification(name: NSControl.textDidBeginEditingNotification, object: field))
-        field.stringValue = "fresh-paste-98765"
-        panel.commitPendingKeyEdits()
-
-        XCTAssertEqual(applied.last?.zaiToken, "fresh-paste-98765",
-                       "the paste must not be lost when the menu closes")
-        XCTAssertEqual(field.stringValue, "********98765", "re-masked after commit")
-    }
-
-    func testCommitSweepIgnoresUntouchedAndEmptyFields() {
-        var config = QuotaBarConfig()
-        config.zaiToken = "old-token-abcde"
-        let panel = InlineSettingsPanel(config: config)
-        var applied: [QuotaBarConfig] = []
-        panel.onApply = { applied.append($0) }
-
-        panel.commitPendingKeyEdits()
-        XCTAssertEqual(applied.count, 0, "an untouched field (mask displayed) applies nothing")
-
-        let field = findTextFields(in: allViews(of: panel)[2], id: "zai").first!
-        panel.controlTextDidBeginEditing(
-            Notification(name: NSControl.textDidBeginEditingNotification, object: field))
-        panel.commitPendingKeyEdits()
-        XCTAssertEqual(applied.count, 0, "an empty entry keeps the stored key")
-        XCTAssertEqual(field.stringValue, "********abcde", "mask restored on the empty round-trip")
     }
 }

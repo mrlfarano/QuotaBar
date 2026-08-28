@@ -4,14 +4,14 @@ import AppKit
 //
 // The status-item dropdown hosts its own settings panel — there is no
 // separate settings window. The rows are NSMenuItems with attached views:
-// poll-cadence radios, per-source checkboxes (with a one-line status under
-// each when something is wrong), and masked key fields. Every change
-// applies live — pushed to the app delegate through `onApply`, which saves
-// via ConfigStore (keeps 0600) and refreshes sources — and the menu stays
-// open while you adjust; the menu is only rebuilt after it closes. Key
-// fields show stars + the last 5 characters; clicking in clears the field
-// for a fresh paste, leaving it empty keeps the old value, and the × button
-// removes a stored key outright. Custom sources and the OAuth-managed
+// poll-cadence radios and per-source checkboxes (with a one-line status
+// under each when something is wrong). Text editing can't live in a menu —
+// menu tracking windows never become key, so an NSTextField there gets no
+// caret and typing goes nowhere — so key entry happens in "Paste API
+// Keys…", a small standard editor (Return saves, Escape cancels, empty
+// keeps, × removes). Every change applies live through `onApply`, which
+// saves via ConfigStore (keeps 0600) and refreshes sources; the menu is
+// only rebuilt after it closes. Custom sources and the OAuth-managed
 // tokens stay JSON-first, reachable via "Open config.json…".
 
 /// Pure settings logic behind the menu rows (unit-tested).
@@ -176,11 +176,31 @@ enum SettingsLogic {
         guard trimmed.count > max else { return trimmed }
         return String(trimmed.prefix(max - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
+
+    // MARK: key editing (pure; unit-tested)
+
+    /// What one field's state in the Paste API Keys editor means.
+    enum KeyEdit: Equatable {
+        case keep                       // untouched, empty, or still the mask
+        case set(String)
+        case clear
+    }
+
+    /// Text editing inside a tracking NSMenu is a dead end (no caret, no
+    /// field editor — the window never becomes key), so keys are edited in
+    /// a standard alert window; this is the pure decision behind each row.
+    static func resolveKeyEdit(current: String, fieldText: String,
+                                clearRequested: Bool) -> KeyEdit {
+        if clearRequested { return .clear }
+        let trimmed = fieldText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == maskedKey(current) { return .keep }
+        return .set(trimmed)
+    }
 }
 
 /// Builds the settings rows embedded at the bottom of the status menu.
 /// One instance per menu build; replaced whenever the menu is rebuilt.
-final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
+final class InlineSettingsPanel: NSObject {
 
     private static let panelWidth: CGFloat = 320
 
@@ -191,7 +211,9 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
     /// Last fetch results, for the per-source status lines.
     private var sections: [SourceSection]
     private var pollRadios: [NSButton] = []
-    private var keyInputs: [String: NSTextField] = [:]
+    /// Transient state of the open Paste API Keys editor.
+    private var keyEditorFields: [String: NSTextField] = [:]
+    private var clearRequestedIds: Set<String> = []
 
     init(config: QuotaBarConfig, sections: [SourceSection] = []) {
         self.config = config
@@ -205,9 +227,10 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
             viewItem(pollRow()),
             viewItem(sourcesGrid()),
         ]
-        for field in SettingsLogic.keyFields {
-            items.append(viewItem(keyRow(field)))
-        }
+        let pasteKeys = NSMenuItem(title: "Paste API Keys…",
+                                   action: #selector(editKeys(_:)), keyEquivalent: "")
+        pasteKeys.target = self
+        items.append(pasteKeys)
         let openConfig = NSMenuItem(title: "Open config.json…",
                                     action: #selector(openConfigFile(_:)), keyEquivalent: "")
         openConfig.target = self
@@ -305,85 +328,116 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
         return panel(grid)
     }
 
-    private func keyRow(_ field: (id: String, title: String, tooltip: String)) -> NSView {
-        let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        let label = NSTextField(labelWithString: field.title)
-        label.font = small
-        label.toolTip = field.tooltip
-
-        let input = NSTextField(string: "")
-        input.isBezeled = true
-        input.bezelStyle = .roundedBezel
-        input.font = small
-        input.controlSize = .small
-        input.placeholderString = "paste key…"
-        input.toolTip = field.tooltip
-        input.delegate = self
-        input.identifier = NSUserInterfaceItemIdentifier(field.id)
-        input.widthAnchor.constraint(equalToConstant: 180).isActive = true
-        input.stringValue = SettingsLogic.maskedKey(SettingsLogic.keyValue(config, id: field.id))
-        keyInputs[field.id] = input
-
-        var views: [NSView] = [label, input]
-        // Removing a stored key has no text-field affordance (leaving the
-        // field empty keeps it), so a stored key gets an explicit ×.
-        if !SettingsLogic.keyValue(config, id: field.id).isEmpty {
-            let clear = NSButton(title: "×", target: self, action: #selector(clearKey(_:)))
-            clear.isBordered = false
-            clear.controlSize = .small
-            clear.font = small
-            clear.identifier = NSUserInterfaceItemIdentifier(field.id)
-            clear.toolTip = "Remove the stored key"
-            views.append(clear)
-        }
-
-        let row = NSStackView(views: views)
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        return panel(row)
-    }
-
     // MARK: key editing
 
-    /// Editing a key field replaces the whole value: entering the field
-    /// clears the mask for a fresh paste; leaving it empty restores the old
-    /// value untouched, anything else is saved and re-masked.
-    func controlTextDidBeginEditing(_ obj: Notification) {
-        guard let input = obj.object as? NSTextField, input.identifier != nil else { return }
-        input.stringValue = ""
-    }
+    /// Paste API Keys… — a standard editor window. Menus can't host text
+    /// editing (no caret in a tracking menu), and a real window gets all
+    /// of it for free: caret, paste, Return saves, Escape cancels. Fields
+    /// are prefilled with the mask; × queues a removal; empty keeps the
+    /// stored key.
+    @objc private func editKeys(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "API keys"
+        alert.informativeText = "Paste over a field to replace its key — leave empty to keep it. Stored in ~/.quotabar/config.json (owner-only)."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
 
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard let input = obj.object as? NSTextField,
-              let id = input.identifier?.rawValue else { return }
-        commitKeyEdit(id: id)
-    }
+        var fields: [String: NSTextField] = [:]
+        var clears: Set<String> = []
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        for field in SettingsLogic.keyFields {
+            let current = SettingsLogic.keyValue(config, id: field.id)
+            let label = NSTextField(labelWithString: field.title)
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            label.toolTip = field.tooltip
 
-    /// Store one key field's current text. Shared by the end-editing
-    /// delegate and the menu-close sweep below.
-    private func commitKeyEdit(id: String) {
-        guard let input = keyInputs[id] else { return }
-        let candidate = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let current = SettingsLogic.keyValue(config, id: id)
-        // Untouched field (mask still in place, no editing session began)
-        // or an empty one: keep the stored value.
-        guard !candidate.isEmpty, candidate != SettingsLogic.maskedKey(current) else {
-            input.stringValue = SettingsLogic.maskedKey(current)
+            let input = NSTextField(string: current.isEmpty ? "" : SettingsLogic.maskedKey(current))
+            input.placeholderString = current.isEmpty ? "paste key…" : ""
+            input.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            input.toolTip = field.tooltip
+            input.identifier = NSUserInterfaceItemIdentifier(field.id)
+            input.widthAnchor.constraint(equalToConstant: 210).isActive = true
+            fields[field.id] = input
+
+            var views: [NSView] = [label, input]
+            if !current.isEmpty {
+                let clear = NSButton(title: "×", target: self, action: #selector(clearKeyRequested(_:)))
+                clear.isBordered = false
+                clear.toolTip = "Remove the stored key"
+                clear.identifier = NSUserInterfaceItemIdentifier(field.id)
+                views.append(clear)
+            }
+            let row = NSStackView(views: views)
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            stack.addArrangedSubview(row)
+        }
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 10))
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -4),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+        ])
+        container.frame.size.height = container.fittingSize.height
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = fields[SettingsLogic.keyFields.first?.id ?? "zai"]
+
+        NSApp.activate(ignoringOtherApps: true)  // same activation the Discover alert uses
+        clearRequestedIds = clears
+        keyEditorFields = fields
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            clearRequestedIds = []
+            keyEditorFields = [:]
             return
         }
-        config = SettingsLogic.setKey(config, id: id, key: candidate)
-        apply()
-        input.stringValue = SettingsLogic.maskedKey(SettingsLogic.keyValue(config, id: id))
+        clears = clearRequestedIds
+        clearRequestedIds = []
+        keyEditorFields = [:]
+
+        if let updated = updatedConfig(fields: fields, clears: clears) {
+            config = updated
+            apply()
+        }
     }
 
-    /// Commit key edits that never saw their end-editing event: menu
-    /// tracking can swallow Return, and closing the menu (or Escape) tears
-    /// the field down silently — without this sweep a pasted key would be
-    /// lost. The app delegate calls it the moment the menu closes, before
-    /// rebuilding.
-    func commitPendingKeyEdits() {
-        for id in keyInputs.keys { commitKeyEdit(id: id) }
+    @objc private func clearKeyRequested(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue,
+              let input = keyEditorFields[id] else { return }
+        clearRequestedIds.insert(id)
+        input.stringValue = ""
+        input.placeholderString = "will be removed"
+    }
+
+    /// Pure-ish seam for the Save path (unit-tested): resolves every
+    /// field into a key edit and returns the updated config, or nil when
+    /// nothing changed.
+    func updatedConfig(fields: [String: NSTextField], clears: Set<String>) -> QuotaBarConfig? {
+        var updated = config
+        var changed = false
+        for field in SettingsLogic.keyFields {
+            guard let input = fields[field.id] else { continue }
+            let current = SettingsLogic.keyValue(config, id: field.id)
+            switch SettingsLogic.resolveKeyEdit(current: current,
+                                                fieldText: input.stringValue,
+                                                clearRequested: clears.contains(field.id)) {
+            case .keep:
+                continue
+            case .set(let key):
+                updated = SettingsLogic.setKey(updated, id: field.id, key: key)
+                changed = true
+            case .clear:
+                updated = SettingsLogic.setKey(updated, id: field.id, key: "")
+                changed = true
+            }
+        }
+        return changed ? updated : nil
     }
 
     // MARK: actions
@@ -399,16 +453,6 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
         guard let id = sender.identifier?.rawValue else { return }
         config = SettingsLogic.setSourceEnabled(config, id: id, enabled: sender.state == .on)
         apply()
-    }
-
-    /// Explicit removal — the keep-if-empty rule only guards the text field,
-    /// so this is the one way to drop a stored credential from the UI.
-    @objc private func clearKey(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        config = SettingsLogic.setKey(config, id: id, key: "")
-        apply()
-        keyInputs[id]?.stringValue = SettingsLogic.maskedKey(
-            SettingsLogic.keyValue(config, id: id))
     }
 
     @objc private func openConfigFile(_ sender: Any?) {

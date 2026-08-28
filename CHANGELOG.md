@@ -24,6 +24,14 @@ All notable changes to QuotaBar are documented here. The format follows
   without an end-editing event — a pasted token silently vanished. Pending
   key edits are now committed the moment the menu closes (found live during
   the 0.11.0 build pass: a real paste never reached the config).
+- **Key entry moved out of the menu into a standard editor window.** Text
+  fields inside a tracking NSMenu never get a field editor — the menu
+  window refuses key status even with the app active, so clicking a key
+  field showed no caret and typing/paste went nowhere (reported live).
+  Settings ▸ now has **Paste API Keys…**, a small editor with all three
+  fields: real caret and paste, Return saves, Escape cancels, empty keeps,
+  × removes. The commit-on-close sweep from the previous fix was retired
+  with the menu fields it guarded.
 
 ### Added
 

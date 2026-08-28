@@ -152,18 +152,18 @@ source renders exactly like a built-in, no recompile.
 
 **Settings** live behind their own **Settings… ▸** submenu in the dropdown
 (⌘, opens it) — poll-cadence radios, per-source on/off checkboxes (Z.AI
-included, so the app is fully usable without a Z.AI account), and the
-directly pasted keys (Z.AI, GitHub, OpenRouter). Each checkbox carries a
+included, so the app is fully usable without a Z.AI account), and **Paste
+API Keys…**, a small standard editor for the directly pasted keys (Z.AI,
+GitHub, OpenRouter): paste over a field to replace it, empty keeps the
+stored key, × removes it. (Text editing can't live in a menu itself — a
+tracking menu window never accepts keyboard focus.) Each checkbox carries a
 one-line status that speaks up when something's wrong (fetch error, missing
-credentials context, or a pending first fetch). The menu stays open while
-you adjust; every change applies live — saved back to the same 0600 file,
-with sources refreshed immediately (a change landing mid-refresh re-runs
-it) — and the data rows catch up when the menu closes. Stored keys are
-masked (`********` + last 5 characters); clicking a key field clears it for
-a fresh paste, leaving it empty keeps the stored value, and the × button
-removes a key outright. Toggling a source never touches its stored
-credentials. Custom sources and the OAuth-managed tokens stay JSON-first
-via **Open config.json…**. The menu footer shows the running version.
+credentials context, or a pending first fetch). Every change applies live —
+saved back to the same 0600 file, with sources refreshed immediately (a
+change landing mid-refresh re-runs it) — and the data rows catch up when
+the menu closes. Toggling a source never touches its stored credentials.
+Custom sources and the OAuth-managed tokens stay JSON-first via
+**Open config.json…**. The menu footer shows the running version.
 
 ## Color bands
 
