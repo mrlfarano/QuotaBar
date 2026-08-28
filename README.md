@@ -16,8 +16,12 @@ menu bar that only speaks up when you're about to run out.
 
 <img src="docs/icon-1024.png" width="140" alt="QuotaBar app icon: concentric dual rings on a dark tile">
 
+<img src="docs/screenshot-menu.png" width="380" alt="QuotaBar menu: provider sections with usage bars and reset countdowns, Settings behind its own submenu">
+
 *One menu, every provider — bars, reset countdowns, which source drives the
-rings, and Settings behind its own submenu.*
+rings, and Settings behind its own submenu. This fresh install has no
+Z.AI token, so the bar shows GitHub's rings — a healthy provider takes
+over instead of an auth warning.*
 
 </div>
 

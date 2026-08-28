@@ -114,11 +114,21 @@
   24% used, 76% left, Resets in 2h 43m") — exactly what VoiceOver gets.
 - The live escalation text was read off the running demo bar as
   `73% · ↻2h46m demo`, confirming the ↻ glyph renders.
-- README screenshot: could not be recaptured from this environment (menus
-  don't stay open under synthetic input here). The stale screenshot (it
-  showed the removed Set Token… row) was removed rather than left
-  misleading; recapture is the author's 10-second next step
-  (`--demo`, open menu, ⌘⇧4, save to docs/screenshot-menu.png).
+- README screenshot: recaptured during the 0.11.0 build pass — a live-mode
+  menu (fresh install, no Z.AI token: the bar shows GitHub's rings, the
+  Phase 1 fallback demonstrated in the image itself) with the Settings ▸
+  arrow and v0.11.0 footer; saved to docs/screenshot-menu.png.
+- Build pass (2026-08-28, later): `make-app.sh VERSION=0.11.0` bundle built
+  and run live. The fresh-install status bar read `0% · ↻2h07m ⚠︎` —
+  GitHub's rings with the new escalation text — where 0.10.0 showed
+  `⚠︎ z.ai auth`: the fallback fix verified in real mode. The Settings ▸
+  submenu was driven via System Events: opened, and its full control tree
+  enumerated (6 poll radios, 7 source checkboxes with status labels, 3 key
+  text fields, Open config.json…). Field typing could not be exercised —
+  synthetic/AX input never receives first-responder status in a tracking
+  NSMenu's field editor (tried AX set-focused, AX click, keystroke; the
+  field editor only engages for real hardware mouse-down). Author's manual
+  paste remains the final gate for that single interaction.
 
 ## Out of scope
 

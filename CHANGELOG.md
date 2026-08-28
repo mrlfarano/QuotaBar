@@ -78,9 +78,6 @@ All notable changes to QuotaBar are documented here. The format follows
   rejected key surfaces as ⚠︎ z.ai auth instead of a modal alert.
 - Bare-letter menu shortcuts (R, D, Q) — they would fire while typing in the
   inline key fields; Refresh, Discover, and Quit now require ⌘.
-- The stale menu screenshot from the README (it still showed the removed
-  Set Token… row) — recapture against the Settings ▸ layout before the
-  next release.
 
 ## [0.10.0] - 2026-08-27
 
