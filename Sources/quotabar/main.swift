@@ -530,7 +530,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(discover)
             menu.addItem(.separator())
             menu.addItem(disabledItem("Settings:"))
-            let panel = InlineSettingsPanel(config: config)
+            let panel = InlineSettingsPanel(config: config, sections: sections)
             settingsPanel = panel // controls hold targets unowned; keep alive
             panel.onApply = { [weak self] updated in
                 guard let self else { return }

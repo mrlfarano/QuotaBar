@@ -105,4 +105,71 @@ final class InlinePanelTests: XCTestCase {
         XCTAssertNotNil(openConfig)
         XCTAssertNotNil(openConfig?.target)
     }
+
+    // MARK: clear-key buttons
+
+    private func findLabels(in view: NSView, containing text: String) -> [NSTextField] {
+        var found: [NSTextField] = []
+        for sub in view.subviews {
+            if let field = sub as? NSTextField, !sub.isKind(of: NSButton.self),
+               field.stringValue.contains(text) {
+                found.append(field)
+            }
+            found.append(contentsOf: findLabels(in: sub, containing: text))
+        }
+        return found
+    }
+
+    func testClearKeyButtonRemovesStoredKey() {
+        var config = QuotaBarConfig()
+        config.zaiToken = "stored-key-abcde"
+        let panel = InlineSettingsPanel(config: config)
+        var applied: [QuotaBarConfig] = []
+        panel.onApply = { applied.append($0) }
+
+        let clear = findButtons(in: allViews(of: panel)[2], id: "zai").first
+        XCTAssertNotNil(clear, "a stored key gets the × clear button")
+
+        NSApp.sendAction(clear!.action!, to: clear!.target, from: clear!)
+        XCTAssertEqual(applied.count, 1)
+        XCTAssertEqual(applied[0].zaiToken, "", "× removes the key outright")
+    }
+
+    func testClearKeyButtonAbsentWithoutStoredKey() {
+        let panel = InlineSettingsPanel(config: QuotaBarConfig())
+        XCTAssertNil(findButtons(in: allViews(of: panel)[2], id: "zai").first,
+                     "nothing to clear — no button")
+    }
+
+    // MARK: poll cadence
+
+    func testCustomPollCadenceGetsItsOwnRadio() {
+        var config = QuotaBarConfig()
+        config.pollMinutes = 45
+        let panel = InlineSettingsPanel(config: config)
+        var applied: [QuotaBarConfig] = []
+        panel.onApply = { applied.append($0) }
+
+        let pollRow = allViews(of: panel)[0]
+        let custom = findButtons(in: pollRow, id: "45")
+        XCTAssertEqual(custom.count, 1, "hand-edited 45m shows as its own radio")
+        XCTAssertEqual(custom[0].state, .on)
+
+        NSApp.sendAction(custom[0].action!, to: custom[0].target, from: custom[0])
+        XCTAssertEqual(applied.last?.pollMinutes, 45)
+    }
+
+    // MARK: per-source status lines
+
+    func testFetchErrorAppearsUnderItsCheckbox() {
+        var config = QuotaBarConfig()
+        config = SettingsLogic.setSourceEnabled(config, id: "claude", enabled: true)
+        let sections = [SourceSection(id: "claude", title: "Claude",
+                                      errorMessage: "run `claude` once to re-authenticate")]
+        let panel = InlineSettingsPanel(config: config, sections: sections)
+
+        XCTAssertFalse(findLabels(in: allViews(of: panel)[1],
+                                  containing: "run `claude` once").isEmpty,
+                       "the settings grid carries the short error")
+    }
 }

@@ -4,14 +4,15 @@ import AppKit
 //
 // The status-item dropdown hosts its own settings panel — there is no
 // separate settings window. The rows are NSMenuItems with attached views:
-// poll-cadence radios, per-source checkboxes, and masked key fields. Every
-// change applies live — pushed to the app delegate through `onApply`, which
-// saves via ConfigStore (keeps 0600) and refreshes sources — and the menu
-// stays open while you adjust; the menu is only rebuilt after it closes.
-// Key fields show stars + the last 5 characters; clicking in clears the
-// field for a fresh paste, clearing it again keeps the old value. Custom
-// sources and the OAuth-managed tokens stay JSON-first, reachable via
-// "Open config.json…".
+// poll-cadence radios, per-source checkboxes (with a one-line status under
+// each when something is wrong), and masked key fields. Every change
+// applies live — pushed to the app delegate through `onApply`, which saves
+// via ConfigStore (keeps 0600) and refreshes sources — and the menu stays
+// open while you adjust; the menu is only rebuilt after it closes. Key
+// fields show stars + the last 5 characters; clicking in clears the field
+// for a fresh paste, leaving it empty keeps the old value, and the × button
+// removes a stored key outright. Custom sources and the OAuth-managed
+// tokens stay JSON-first, reachable via "Open config.json…".
 
 /// Pure settings logic behind the menu rows (unit-tested).
 enum SettingsLogic {
@@ -143,6 +144,36 @@ enum SettingsLogic {
         }
         return config
     }
+
+    // MARK: per-source status lines (pure; unit-tested)
+
+    /// One-line status under a source's checkbox. Calm by design: disabled
+    /// and healthy sources show nothing; only problems and pending first
+    /// fetches speak up.
+    static func sourceStatus(id: String, config: QuotaBarConfig,
+                             sections: [SourceSection]) -> String? {
+        guard isSourceEnabled(config, id: id) else { return nil }
+        guard let section = sections.first(where: { $0.id == id }) else {
+            return "waiting for first fetch"
+        }
+        if let message = section.errorMessage {
+            return "⚠︎ \(shortStatus(message))"
+        }
+        if section.gauges.isEmpty {
+            if let notice = section.notice { return shortStatus(notice) }
+            return "waiting for data"
+        }
+        return nil
+    }
+
+    /// First sentence of a message, capped with an ellipsis — long errors
+    /// must not widen the whole settings block.
+    static func shortStatus(_ message: String, max: Int = 40) -> String {
+        let first = message.split(whereSeparator: \.isNewline).first.map(String.init) ?? message
+        let trimmed = first.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count > max else { return trimmed }
+        return String(trimmed.prefix(max - 1)).trimmingCharacters(in: .whitespaces) + "…"
+    }
 }
 
 /// Builds the settings rows embedded at the bottom of the status menu.
@@ -155,11 +186,14 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
     var onApply: ((QuotaBarConfig) -> Void)?
 
     private var config: QuotaBarConfig
+    /// Last fetch results, for the per-source status lines.
+    private var sections: [SourceSection]
     private var pollRadios: [NSButton] = []
     private var keyInputs: [String: NSTextField] = [:]
 
-    init(config: QuotaBarConfig) {
+    init(config: QuotaBarConfig, sections: [SourceSection] = []) {
         self.config = config
+        self.sections = sections
     }
 
     /// The settings block: header row is added by the caller so it matches
@@ -212,7 +246,14 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
         row.alignment = .centerY
         row.spacing = 2
         let active = normalizedPollMinutes(config.pollMinutes)
-        for minutes in SettingsLogic.pollChoices {
+        // Hand-edited cadences outside the presets get their own radio so
+        // the row never shows nothing-selected.
+        var choices = SettingsLogic.pollChoices
+        if !choices.contains(active) {
+            choices.append(active)
+            choices.sort()
+        }
+        for minutes in choices {
             let radio = NSButton(radioButtonWithTitle: "\(minutes)",
                                  target: self, action: #selector(changedPoll(_:)))
             radio.controlSize = .small
@@ -240,7 +281,19 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
             check.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             check.identifier = NSUserInterfaceItemIdentifier(source.id)
             check.state = SettingsLogic.isSourceEnabled(config, id: source.id) ? .on : .off
-            row.append(check)
+            let cell = NSStackView(views: [check])
+            cell.orientation = .vertical
+            cell.alignment = .leading
+            cell.spacing = 0
+            // Problem/pending status under the checkbox; empty label keeps
+            // row heights even when everything is calm.
+            let status = NSTextField(labelWithString: SettingsLogic.sourceStatus(
+                id: source.id, config: config, sections: sections) ?? "")
+            status.font = .systemFont(ofSize: 10)
+            status.textColor = .tertiaryLabelColor
+            status.lineBreakMode = .byTruncatingTail
+            cell.addArrangedSubview(status)
+            row.append(cell)
             if row.count == 2 {
                 grid.addRow(with: row)
                 row = []
@@ -269,7 +322,20 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
         input.stringValue = SettingsLogic.maskedKey(SettingsLogic.keyValue(config, id: field.id))
         keyInputs[field.id] = input
 
-        let row = NSStackView(views: [label, input])
+        var views: [NSView] = [label, input]
+        // Removing a stored key has no text-field affordance (leaving the
+        // field empty keeps it), so a stored key gets an explicit ×.
+        if !SettingsLogic.keyValue(config, id: field.id).isEmpty {
+            let clear = NSButton(title: "×", target: self, action: #selector(clearKey(_:)))
+            clear.isBordered = false
+            clear.controlSize = .small
+            clear.font = small
+            clear.identifier = NSUserInterfaceItemIdentifier(field.id)
+            clear.toolTip = "Remove the stored key"
+            views.append(clear)
+        }
+
+        let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
@@ -315,6 +381,16 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
         guard let id = sender.identifier?.rawValue else { return }
         config = SettingsLogic.setSourceEnabled(config, id: id, enabled: sender.state == .on)
         apply()
+    }
+
+    /// Explicit removal — the keep-if-empty rule only guards the text field,
+    /// so this is the one way to drop a stored credential from the UI.
+    @objc private func clearKey(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        config = SettingsLogic.setKey(config, id: id, key: "")
+        apply()
+        keyInputs[id]?.stringValue = SettingsLogic.maskedKey(
+            SettingsLogic.keyValue(config, id: id))
     }
 
     @objc private func openConfigFile(_ sender: Any?) {

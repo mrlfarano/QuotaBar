@@ -174,6 +174,56 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(SettingsLogic.isSourceEnabled(toggled, id: "claude"))
     }
 
+    // MARK: per-source status lines
+
+    func testSourceStatusSilentWhenDisabledOrHealthy() {
+        var config = QuotaBarConfig()
+        XCTAssertNil(SettingsLogic.sourceStatus(id: "claude", config: config, sections: []),
+                     "disabled sources stay silent")
+        config = SettingsLogic.setSourceEnabled(config, id: "claude", enabled: true)
+        let healthy = [SourceSection(id: "claude", title: "Claude",
+                                     gauges: [Gauge(id: "claude-5h", label: "5h", pct: 10)])]
+        XCTAssertNil(SettingsLogic.sourceStatus(id: "claude", config: config, sections: healthy),
+                     "healthy sources stay silent — calm by design")
+    }
+
+    func testSourceStatusWaitingStates() {
+        var config = QuotaBarConfig()
+        config = SettingsLogic.setSourceEnabled(config, id: "codex", enabled: true)
+        XCTAssertEqual(SettingsLogic.sourceStatus(id: "codex", config: config, sections: []),
+                       "waiting for first fetch")
+        XCTAssertEqual(SettingsLogic.sourceStatus(
+            id: "codex", config: config,
+            sections: [SourceSection(id: "codex", title: "Codex")]),
+                       "waiting for data")
+    }
+
+    func testSourceStatusShortensErrorsAndSurfacesNotices() {
+        var config = QuotaBarConfig()
+        config = SettingsLogic.setSourceEnabled(config, id: "claude", enabled: true)
+        config = SettingsLogic.setSourceEnabled(config, id: "antigravity", enabled: true)
+        let sections = [
+            SourceSection(id: "claude", title: "Claude",
+                          errorMessage: "run `claude` once to re-authenticate"),
+            SourceSection(id: "antigravity", title: "Antigravity",
+                          notice: "Antigravity isn't running — open the app"),
+        ]
+        XCTAssertEqual(SettingsLogic.sourceStatus(id: "claude", config: config, sections: sections),
+                       "⚠︎ run `claude` once to re-authenticate")
+        XCTAssertEqual(SettingsLogic.sourceStatus(id: "antigravity", config: config, sections: sections),
+                       "Antigravity isn't running — open the app",
+                       "notices surface without the warning glyph")
+    }
+
+    func testShortStatusFirstLineAndCap() {
+        XCTAssertEqual(SettingsLogic.shortStatus("line one\nline two"), "line one")
+        let long = String(repeating: "x", count: 60)
+        let capped = SettingsLogic.shortStatus(long)
+        XCTAssertEqual(capped.count, 40)
+        XCTAssertTrue(capped.hasSuffix("…"))
+        XCTAssertEqual(SettingsLogic.shortStatus("exactly fine"), "exactly fine")
+    }
+
     // MARK: version label
 
     func testVersionLabel() {
