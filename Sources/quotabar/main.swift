@@ -165,8 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var config = ConfigStore.load()
     private var snapshot: Snapshot?
     private var sections: [SourceSection] = []
-    private var settingsController: SettingsWindowController?
+    private var settingsPanel: InlineSettingsPanel?
     private var refreshing = false
+    private var menuIsOpen = false
+    private var menuRebuildPending = false
     private let demoMode: Bool
     private var demoGauges: [Gauge] = [
         Gauge(id: "fiveHour", label: "5-hour window", pct: 24, used: 28_800, total: 120_000,
@@ -432,9 +434,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: menu
 
-    /// Recompute every menu row from current state. Called on updates; the
-    /// menu is closed whenever this runs, so rebuilding from scratch is safe.
+    /// Recompute every menu row from current state. Called on updates. While
+    /// the menu is open, mutating items would cancel the popup (and destroy
+    /// any in-progress key edit), so the rebuild is deferred to menuDidClose.
     private func rebuild(reason: String) {
+        if menuIsOpen {
+            menuRebuildPending = true
+            updateStatusItem()
+            return
+        }
         updateStatusItem()
 
         menu.removeAllItems()
@@ -500,7 +508,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
+        // Bare-letter equivalents would fire while typing in the inline key
+        // fields, so the menu shortcuts require ⌘.
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshMenuItem(_:)), keyEquivalent: "r")
+        refreshItem.keyEquivalentModifierMask = .command
         refreshItem.target = self
         menu.addItem(refreshItem)
 
@@ -511,21 +522,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if !demoMode {
-            let token = NSMenuItem(title: "Set Token…", action: #selector(setToken(_:)), keyEquivalent: "")
-            token.target = self
-            menu.addItem(token)
             let discover = NSMenuItem(title: "Discover Sources", action: #selector(discoverSources(_:)), keyEquivalent: "d")
+            discover.keyEquivalentModifierMask = .command
             discover.target = self
             menu.addItem(discover)
-            let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
-            settings.target = self
-            menu.addItem(settings)
+            menu.addItem(.separator())
+            menu.addItem(disabledItem("Settings:"))
+            let panel = InlineSettingsPanel(config: config)
+            settingsPanel = panel // controls hold targets unowned; keep alive
+            panel.onApply = { [weak self] updated in
+                guard let self else { return }
+                self.config = updated
+                ConfigStore.save(updated)
+                self.updateStatusItem()
+                self.rebuild(reason: "settings")
+                Task { @MainActor in await self.refreshNow() }
+            }
+            for item in panel.items() { menu.addItem(item) }
         }
 
         menu.addItem(.separator())
         menu.addItem(disabledItem(appVersionLabel()))
         let quit = NSMenuItem(title: "Quit QuotaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.keyEquivalentModifierMask = .command
         menu.addItem(quit)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        menuIsOpen = true
+        menuRebuildPending = false
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsOpen = false
+        guard menuRebuildPending else { return }
+        menuRebuildPending = false
+        rebuild(reason: "menu-closed")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -584,69 +616,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = outcome.lines.joined(separator: "\n")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
-    }
-
-    /// Settings window: shared instance so reopening re-syncs to the live
-    /// config instead of showing stale controls.
-    @objc private func openSettings(_ sender: Any?) {
-        if let settingsController {
-            settingsController.refresh(from: config)
-            settingsController.showWindow(nil)
-        } else {
-            let controller = SettingsWindowController(config: config)
-            controller.onApply = { [weak self] updated in
-                guard let self else { return }
-                self.config = updated
-                self.rebuild(reason: "settings")
-                Task { @MainActor in await self.refreshNow() }
-            }
-            settingsController = controller
-            controller.showWindow(nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @objc private func setToken(_ sender: Any?) {
-        let alert = NSAlert()
-        alert.messageText = "Z.AI credential for usage queries"
-        alert.informativeText = """
-        Get the token the z.ai dashboard itself uses:
-        1. Sign in at z.ai and open the usage page
-           (z.ai/manage-apikey/coding-plan/personal/usage)
-        2. DevTools → Application → Local Storage → https://z.ai
-        3. Copy the value of "z-ai-open-platform-token-production" and paste it here.
-        Stored locally in ~/.quotabar/config.json with owner-only permissions.
-        """
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
-        field.placeholderString = "token / api key"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Save & Test")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let candidate = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty else { return }
-
-        setTransient("…checking token")
-        Task { @MainActor in
-            var trial = config
-            trial.zaiToken = candidate
-            trial.authScheme = nil
-            let snap = await ZaiSource.fetchSnapshot(config: trial)
-            if snap.errorMessage?.lowercased().contains("authoriz") == true
-                || snap.errorMessage?.lowercased().contains("token") == true {
-                let fail = NSAlert()
-                fail.messageText = "Token rejected"
-                fail.informativeText = snap.errorMessage ?? "Authorization failed."
-                fail.runModal()
-                rebuild(reason: "token-rejected")
-                return
-            }
-            config = trial
-            config.authScheme = snap.usedScheme
-            ConfigStore.save(config)
-            applySnapshot(snap)
-        }
     }
 }
 

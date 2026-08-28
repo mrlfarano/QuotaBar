@@ -49,7 +49,7 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] 9h24m
 
 | Source | Shows | Credential | Endpoint |
 |--------|-------|------------|----------|
-| **Z.AI Coding Plan** (`zai`) | 5h + weekly token windows, MCP monthly, per-model detail | browser token (Set Token…) | reverse-engineered |
+| **Z.AI Coding Plan** (`zai`) | 5h + weekly token windows, MCP monthly, per-model detail | browser token (paste in the menu key fields) | reverse-engineered |
 | **Claude Pro/Max** (`claude`) | 5h + weekly utilization | Claude Code's OAuth session | reverse-engineered |
 | **Codex / ChatGPT** (`codex`) | 5h + weekly windows, plan tier | Codex CLI's stored token | reverse-engineered |
 | **GitHub Copilot** (`copilot`) | monthly premium requests used vs entitlement | opencode/VS Code auth files, or paste | reverse-engineered |
@@ -57,6 +57,9 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] 9h24m
 | **OpenRouter** (`openrouter`) | credits used vs limit (USD) | `OPENROUTER_API_KEY` or paste | official |
 | **GitHub** (`github`) | API core rate limit | optional `GH_TOKEN` | official |
 | **Custom** (n many) | any JSON with used/limit (+reset) | whatever you configure | yours |
+
+A **Windows port** (system-tray app, same sources/parsers/config/glyph)
+lives in [`windows/`](windows/README.md).
 
 The **Status Bar Source** picker decides whose numbers drive the rings;
 anything that fails falls back to the next healthy provider.
@@ -111,7 +114,7 @@ through the menu:
 
 ```jsonc
 {
-  "zaiToken": "…",              // Set Token… stores this
+  "zaiToken": "…",              // menu key field "Z.AI" stores this
   "pollMinutes": 5,             // all sources poll on this cadence
   "mainSource": "zai",          // Status Bar Source picker
   "sources": {
@@ -135,11 +138,15 @@ extra headers via `"headers": {…}`, and `resetPath` accepts epoch seconds,
 epoch milliseconds, or ISO8601. Missing `usedPath` defaults to 0; a custom
 source renders exactly like a built-in, no recompile.
 
-**Settings…** (⌘,) in the menu configures the everyday fields from the UI —
-poll cadence and per-source on/off — applied live and saved back to the same
-0600 file; toggling a source never touches its stored credentials. Custom
-sources and tokens stay JSON-first via **Open config.json…**. The menu
-footer shows the running version.
+**Settings** live in the dropdown itself, under their own header at the
+bottom of the menu — poll-cadence radios, per-source on/off checkboxes, and
+the directly pasted keys (Z.AI, GitHub, OpenRouter). The menu stays open
+while you adjust; every change applies live and is saved back to the same
+0600 file, and toggling a source never touches its stored credentials.
+Stored keys are masked (`********` + last 5 characters); clicking a key
+field clears it for a fresh paste, leaving it empty keeps the stored value.
+Custom sources and the OAuth-managed tokens stay JSON-first via
+**Open config.json…**. The menu footer shows the running version.
 
 ## Color bands
 

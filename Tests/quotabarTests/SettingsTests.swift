@@ -1,8 +1,9 @@
 import XCTest
 @testable import quotabar
 
-// Pure logic behind the Settings window: poll-cadence clamping, per-source
-// enable toggles (with credential preservation), and the version label.
+// Pure logic behind the inline settings rows in the menu dropdown:
+// poll-cadence clamping, per-source enable toggles (with credential
+// preservation), masked key entry, and the version label.
 
 final class SettingsTests: XCTestCase {
 
@@ -15,17 +16,95 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(normalizedPollMinutes(999), 60)
     }
 
+    // MARK: masked keys
+
+    func testMaskedKeyKeepsOnlyLastFiveCharacters() {
+        XCTAssertEqual(SettingsLogic.maskedKey("sk-or-v1-0123456789abcdefghij"),
+                       "********fghij")
+        XCTAssertEqual(SettingsLogic.maskedKey("1234567890"), "********67890")
+    }
+
+    func testMaskedKeyShortKeysStayAllStars() {
+        XCTAssertEqual(SettingsLogic.maskedKey(""), "")
+        XCTAssertEqual(SettingsLogic.maskedKey("abc"), "***")
+        XCTAssertEqual(SettingsLogic.maskedKey("abcde"), "*****",
+                       "exactly five characters: nothing readable")
+        XCTAssertEqual(SettingsLogic.maskedKey("  ab  "), "**",
+                       "whitespace is trimmed before masking")
+    }
+
+    func testMaskedKeyFixedLengthDoesNotLeakKeyLength() {
+        XCTAssertEqual(SettingsLogic.maskedKey("abcdefghijklmn"), "********jklmn")
+        XCTAssertEqual(SettingsLogic.maskedKey("abcdefghijklmnopqrstuvwxyz012345"),
+                       "********12345",
+                       "a 32-char key and a 14-char key both show exactly 8 stars + last 5")
+    }
+
+    // MARK: key fields
+
+    func testSetKeyRoundTrip() {
+        var config = QuotaBarConfig()
+        config.authScheme = "Bearer "
+        config = SettingsLogic.setKey(config, id: "zai", key: "z1")
+        XCTAssertEqual(SettingsLogic.keyValue(config, id: "zai"), "z1")
+        XCTAssertEqual(config.zaiToken, "z1")
+        XCTAssertNil(config.authScheme, "changing the Z.AI key must re-probe header styles")
+        XCTAssertEqual(SettingsLogic.maskedKey(config.zaiToken),
+                       SettingsLogic.maskedKey("z1"))
+
+        config = SettingsLogic.setKey(config, id: "github", key: "gh1")
+        config = SettingsLogic.setKey(config, id: "openrouter", key: "or1")
+        XCTAssertEqual(SettingsLogic.keyValue(config, id: "github"), "gh1")
+        XCTAssertEqual(SettingsLogic.keyValue(config, id: "openrouter"), "or1")
+        XCTAssertEqual(config.zaiToken, "z1", "one field must not disturb the others")
+    }
+
+    func testSetKeyCreatesSourceStructOnDemand() {
+        let config = QuotaBarConfig() // sources nil
+        let updated = SettingsLogic.setKey(config, id: "github", key: "gh1")
+        XCTAssertEqual(updated.sources?.github?.token, "gh1")
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(updated, id: "github"),
+                      "pasting a key into a fresh struct keeps its enabled-by-default state")
+
+        let openrouter = SettingsLogic.setKey(config, id: "openrouter", key: "or1")
+        XCTAssertEqual(openrouter.sources?.openrouter?.token, "or1")
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(openrouter, id: "openrouter"),
+                      "a fresh struct enables the source — pasting a key reads as intent to use it")
+    }
+
+    func testSetKeyPreservesExistingSourceState() {
+        var config = QuotaBarConfig()
+        config.sources = SourcesConfig()
+        config.sources?.github = GitHubSourceConfig(enabled: false, token: "", discovered: true)
+        config.sources?.openrouter = OAuthSourceConfig(enabled: false, token: "",
+                                                       refreshToken: "r0", accountId: "a0")
+        config = SettingsLogic.setKey(config, id: "github", key: "gh1")
+        config = SettingsLogic.setKey(config, id: "openrouter", key: "or1")
+
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "github"),
+                       "an explicit opt-out survives key entry")
+        XCTAssertTrue(config.sources?.github?.discovered ?? false)
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "openrouter"))
+        XCTAssertEqual(config.sources?.openrouter?.refreshToken, "r0")
+        XCTAssertEqual(config.sources?.openrouter?.accountId, "a0")
+        XCTAssertEqual(config.sources?.openrouter?.token, "or1")
+    }
+
+    func testKeyValueUnknownFieldIsEmpty() {
+        XCTAssertEqual(SettingsLogic.keyValue(QuotaBarConfig(), id: "unknown"), "")
+    }
+
     // MARK: source enable state
 
     func testDefaultEnabledStatesMirrorFetchGates() {
         let config = QuotaBarConfig()
-        XCTAssertTrue(SettingsWindowController.isSourceEnabled(config, id: "github"),
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(config, id: "github"),
                       "GitHub polls by default")
         for id in ["claude", "codex", "openrouter", "copilot", "antigravity"] {
-            XCTAssertFalse(SettingsWindowController.isSourceEnabled(config, id: id),
+            XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: id),
                            "\(id) stays off until discovered or enabled")
         }
-        XCTAssertFalse(SettingsWindowController.isSourceEnabled(config, id: "unknown"))
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "unknown"))
     }
 
     func testTogglePreservesStoredCredentials() {
@@ -33,24 +112,24 @@ final class SettingsTests: XCTestCase {
         config.sources = SourcesConfig()
         config.sources?.codex = OAuthSourceConfig(token: "t0", accountId: "a1", discovered: true)
 
-        config = SettingsWindowController.setSourceEnabled(config, id: "codex", enabled: false)
-        XCTAssertFalse(SettingsWindowController.isSourceEnabled(config, id: "codex"))
+        config = SettingsLogic.setSourceEnabled(config, id: "codex", enabled: false)
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "codex"))
         XCTAssertEqual(config.sources?.codex?.token, "t0")
         XCTAssertEqual(config.sources?.codex?.accountId, "a1")
         XCTAssertTrue(config.sources?.codex?.discovered ?? false)
 
-        config = SettingsWindowController.setSourceEnabled(config, id: "codex", enabled: true)
-        XCTAssertTrue(SettingsWindowController.isSourceEnabled(config, id: "codex"))
+        config = SettingsLogic.setSourceEnabled(config, id: "codex", enabled: true)
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(config, id: "codex"))
         XCTAssertEqual(config.sources?.codex?.token, "t0", "re-enabling must not wipe the token")
     }
 
     func testToggleCreatesMissingSourceStruct() {
         let config = QuotaBarConfig() // sources nil
-        let toggled = SettingsWindowController.setSourceEnabled(config, id: "copilot", enabled: true)
-        XCTAssertTrue(SettingsWindowController.isSourceEnabled(toggled, id: "copilot"))
-        XCTAssertTrue(SettingsWindowController.isSourceEnabled(toggled, id: "github"),
+        let toggled = SettingsLogic.setSourceEnabled(config, id: "copilot", enabled: true)
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(toggled, id: "copilot"))
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(toggled, id: "github"),
                       "toggling one source must not flip GitHub's default")
-        XCTAssertFalse(SettingsWindowController.isSourceEnabled(toggled, id: "claude"))
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(toggled, id: "claude"))
     }
 
     // MARK: version label

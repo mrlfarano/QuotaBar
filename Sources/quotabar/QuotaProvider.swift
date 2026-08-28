@@ -148,7 +148,7 @@ enum ZaiSource {
         let token = resolvedToken(config: config)
         guard !token.isEmpty else {
             return Snapshot(fetchedAt: Date(), rawJSON: "", gauges: [],
-                            errorMessage: "No token configured — Set Token…", usedScheme: "")
+                            errorMessage: "No token — paste it in the menu's key fields", usedScheme: "")
         }
         let environment = ProcessInfo.processInfo.environment
         let base = environment["QUOTABAR_ZAI_BASE"] ?? config.baseURL

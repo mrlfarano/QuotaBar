@@ -1,0 +1,316 @@
+import AppKit
+
+// MARK: - Inline menu settings
+//
+// The status-item dropdown hosts its own settings panel — there is no
+// separate settings window. The rows are NSMenuItems with attached views:
+// poll-cadence radios, per-source checkboxes, and masked key fields. Every
+// change applies live — pushed to the app delegate through `onApply`, which
+// saves via ConfigStore (keeps 0600) and refreshes sources — and the menu
+// stays open while you adjust; the menu is only rebuilt after it closes.
+// Key fields show stars + the last 5 characters; clicking in clears the
+// field for a fresh paste, clearing it again keeps the old value. Custom
+// sources and the OAuth-managed tokens stay JSON-first, reachable via
+// "Open config.json…".
+
+/// Pure settings logic behind the menu rows (unit-tested).
+enum SettingsLogic {
+
+    static let pollChoices = [1, 2, 5, 10, 15, 30]
+
+    static let toggleableSources: [(id: String, title: String)] = [
+        ("github", "GitHub API"),
+        ("claude", "Claude Pro/Max"),
+        ("codex", "Codex / ChatGPT"),
+        ("openrouter", "OpenRouter"),
+        ("copilot", "GitHub Copilot"),
+        ("antigravity", "Antigravity"),
+    ]
+
+    static let keyFields: [(id: String, title: String, tooltip: String)] = [
+        ("zai", "Z.AI",
+         "z.ai → usage page → DevTools → Application → Local Storage → "
+         + "\"z-ai-open-platform-token-production\". Stored in ~/.quotabar/config.json (owner-only)."),
+        ("github", "GitHub",
+         "Optional personal-access token; raises the core rate limit from 60/hr to 5,000/hr."),
+        ("openrouter", "OpenRouter",
+         "OpenRouter API key (sk-or-…)."),
+    ]
+
+    /// Stars for everything but the last 5 characters, so a stored key is
+    /// recognizable without being readable. The star count is fixed — the
+    /// mask must not leak the key's length.
+    static func maskedKey(_ key: String) -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 5 else { return String(repeating: "*", count: trimmed.count) }
+        return String(repeating: "*", count: 8) + trimmed.suffix(5)
+    }
+
+    /// Stored value behind a key field ("" when unset).
+    static func keyValue(_ config: QuotaBarConfig, id: String) -> String {
+        switch id {
+        case "zai": return config.zaiToken
+        case "github": return config.sources?.github?.token ?? ""
+        case "openrouter": return config.sources?.openrouter?.token ?? ""
+        default: return ""
+        }
+    }
+
+    /// Store one key. Z.AI also drops the remembered auth scheme so the next
+    /// fetch re-probes header styles. Source structs are created on demand —
+    /// pasting a key reads as intent to use the source, so a fresh struct
+    /// carries the enabled-by-default state; an existing one keeps its
+    /// `enabled` flag and other credentials untouched.
+    static func setKey(_ config: QuotaBarConfig, id: String, key: String) -> QuotaBarConfig {
+        var config = config
+        switch id {
+        case "zai":
+            config.zaiToken = key
+            config.authScheme = nil
+        case "github":
+            if config.sources == nil { config.sources = SourcesConfig() }
+            var github = config.sources?.github ?? GitHubSourceConfig()
+            github.token = key
+            config.sources?.github = github
+        case "openrouter":
+            if config.sources == nil { config.sources = SourcesConfig() }
+            var openrouter = config.sources?.openrouter ?? OAuthSourceConfig()
+            openrouter.token = key
+            config.sources?.openrouter = openrouter
+        default: break
+        }
+        return config
+    }
+
+    // MARK: enable-state logic (pure; unit-tested)
+
+    /// Mirrors the fetch gates in AppDelegate: GitHub polls unless explicitly
+    /// disabled; OAuth-backed sources only poll when explicitly enabled.
+    static func isSourceEnabled(_ config: QuotaBarConfig, id: String) -> Bool {
+        switch id {
+        case "github": return config.sources?.github?.enabled ?? true
+        case "claude": return config.sources?.claude?.enabled ?? false
+        case "codex": return config.sources?.codex?.enabled ?? false
+        case "openrouter": return config.sources?.openrouter?.enabled ?? false
+        case "copilot": return config.sources?.copilot?.enabled ?? false
+        case "antigravity": return config.sources?.antigravity?.enabled ?? false
+        default: return false
+        }
+    }
+
+    /// Toggle one source without disturbing its stored credentials or
+    /// discovery state (mutates only `enabled`, creating the struct if needed).
+    static func setSourceEnabled(_ config: QuotaBarConfig, id: String, enabled: Bool) -> QuotaBarConfig {
+        var config = config
+        if config.sources == nil { config.sources = SourcesConfig() }
+        func oauth(_ current: OAuthSourceConfig?) -> OAuthSourceConfig {
+            var source = current ?? OAuthSourceConfig()
+            source.enabled = enabled
+            return source
+        }
+        switch id {
+        case "github":
+            var github = config.sources?.github ?? GitHubSourceConfig()
+            github.enabled = enabled
+            config.sources?.github = github
+        case "claude":
+            let source = oauth(config.sources?.claude)
+            config.sources?.claude = source
+        case "codex":
+            let source = oauth(config.sources?.codex)
+            config.sources?.codex = source
+        case "openrouter":
+            let source = oauth(config.sources?.openrouter)
+            config.sources?.openrouter = source
+        case "copilot":
+            let source = oauth(config.sources?.copilot)
+            config.sources?.copilot = source
+        case "antigravity":
+            let source = oauth(config.sources?.antigravity)
+            config.sources?.antigravity = source
+        default: break
+        }
+        return config
+    }
+}
+
+/// Builds the settings rows embedded at the bottom of the status menu.
+/// One instance per menu build; replaced whenever the menu is rebuilt.
+final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
+
+    private static let panelWidth: CGFloat = 320
+
+    /// Invoked on the main thread after each change with the updated config.
+    var onApply: ((QuotaBarConfig) -> Void)?
+
+    private var config: QuotaBarConfig
+    private var pollRadios: [NSButton] = []
+    private var keyInputs: [String: NSTextField] = [:]
+
+    init(config: QuotaBarConfig) {
+        self.config = config
+    }
+
+    /// The settings block: header row is added by the caller so it matches
+    /// the other disabled menu headers.
+    func items() -> [NSMenuItem] {
+        var items: [NSMenuItem] = [
+            viewItem(pollRow()),
+            viewItem(sourcesGrid()),
+        ]
+        for field in SettingsLogic.keyFields {
+            items.append(viewItem(keyRow(field)))
+        }
+        let openConfig = NSMenuItem(title: "Open config.json…",
+                                    action: #selector(openConfigFile(_:)), keyEquivalent: "")
+        openConfig.target = self
+        items.append(openConfig)
+        return items
+    }
+
+    // MARK: rows
+
+    private func viewItem(_ view: NSView) -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.view = view
+        return item
+    }
+
+    /// Wraps content in a fixed-width container so every settings row shares
+    /// the menu panel's width; height comes from the content's constraints.
+    private func panel(_ content: NSView) -> NSView {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 10))
+        container.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
+        ])
+        container.frame.size.height = container.fittingSize.height
+        return container
+    }
+
+    private func pollRow() -> NSView {
+        let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let label = NSTextField(labelWithString: "Poll every")
+        label.font = small
+        let row = NSStackView(views: [label])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 2
+        let active = normalizedPollMinutes(config.pollMinutes)
+        for minutes in SettingsLogic.pollChoices {
+            let radio = NSButton(radioButtonWithTitle: "\(minutes)",
+                                 target: self, action: #selector(changedPoll(_:)))
+            radio.controlSize = .small
+            radio.font = small
+            radio.identifier = NSUserInterfaceItemIdentifier("\(minutes)")
+            radio.state = active == minutes ? .on : .off
+            pollRadios.append(radio)
+            row.addArrangedSubview(radio)
+        }
+        let unit = NSTextField(labelWithString: "min")
+        unit.font = small
+        row.addArrangedSubview(unit)
+        return panel(row)
+    }
+
+    private func sourcesGrid() -> NSView {
+        let grid = NSGridView(numberOfColumns: 2, rows: 0)
+        grid.rowSpacing = 4
+        grid.columnSpacing = 18
+        var row: [NSView] = []
+        for source in SettingsLogic.toggleableSources {
+            let check = NSButton(checkboxWithTitle: source.title,
+                                 target: self, action: #selector(toggledSource(_:)))
+            check.controlSize = .small
+            check.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            check.identifier = NSUserInterfaceItemIdentifier(source.id)
+            check.state = SettingsLogic.isSourceEnabled(config, id: source.id) ? .on : .off
+            row.append(check)
+            if row.count == 2 {
+                grid.addRow(with: row)
+                row = []
+            }
+        }
+        if !row.isEmpty { grid.addRow(with: row) }
+        return panel(grid)
+    }
+
+    private func keyRow(_ field: (id: String, title: String, tooltip: String)) -> NSView {
+        let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let label = NSTextField(labelWithString: field.title)
+        label.font = small
+        label.toolTip = field.tooltip
+
+        let input = NSTextField(string: "")
+        input.isBezeled = true
+        input.bezelStyle = .roundedBezel
+        input.font = small
+        input.controlSize = .small
+        input.placeholderString = "paste key…"
+        input.toolTip = field.tooltip
+        input.delegate = self
+        input.identifier = NSUserInterfaceItemIdentifier(field.id)
+        input.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        input.stringValue = SettingsLogic.maskedKey(SettingsLogic.keyValue(config, id: field.id))
+        keyInputs[field.id] = input
+
+        let row = NSStackView(views: [label, input])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        return panel(row)
+    }
+
+    // MARK: key editing
+
+    /// Editing a key field replaces the whole value: entering the field
+    /// clears the mask for a fresh paste; leaving it empty restores the old
+    /// value untouched, anything else is saved and re-masked.
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard let input = obj.object as? NSTextField, input.identifier != nil else { return }
+        input.stringValue = ""
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let input = obj.object as? NSTextField,
+              let id = input.identifier?.rawValue else { return }
+        let candidate = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = SettingsLogic.keyValue(config, id: id)
+        // Untouched field (mask still in place, no editing session began)
+        // or an empty one: keep the stored value.
+        guard !candidate.isEmpty, candidate != SettingsLogic.maskedKey(current) else {
+            input.stringValue = SettingsLogic.maskedKey(current)
+            return
+        }
+        config = SettingsLogic.setKey(config, id: id, key: candidate)
+        apply()
+        input.stringValue = SettingsLogic.maskedKey(SettingsLogic.keyValue(config, id: id))
+    }
+
+    // MARK: actions
+
+    @objc private func changedPoll(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue, let minutes = Int(raw) else { return }
+        config.pollMinutes = normalizedPollMinutes(minutes)
+        for radio in pollRadios where radio !== sender { radio.state = .off }
+        apply()
+    }
+
+    @objc private func toggledSource(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        config = SettingsLogic.setSourceEnabled(config, id: id, enabled: sender.state == .on)
+        apply()
+    }
+
+    @objc private func openConfigFile(_ sender: Any?) {
+        NSWorkspace.shared.open(ConfigStore.configFileURL)
+    }
+
+    private func apply() {
+        onApply?(config)
+    }
+}

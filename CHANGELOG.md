@@ -8,13 +8,37 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ### Added
 
-- **Settings…** (⌘,) — configure the app from the UI: poll cadence and
-  per-source on/off toggles, applied live and saved through the same 0600
-  config file. Toggling a source never touches its stored credentials or
-  discovery state; **Open config.json…** opens the JSON for the
-  JSON-only parts (custom sources, tokens).
+- **Inline settings in the dropdown** — poll cadence (radio row), per-source
+  on/off checkboxes, and the directly pasted keys (Z.AI, GitHub, OpenRouter)
+  live in the status-item menu itself; there is no separate settings window.
+  The menu stays open while you adjust, every change applies live (saved to
+  the same 0600 config, sources refresh immediately), and the data rows
+  catch up once the menu closes. Stored keys display masked (`********` +
+  the last 5 characters, fixed star count so the length never leaks);
+  clicking a field clears it for a fresh paste, leaving it empty keeps the
+  stored value, and changing the Z.AI key re-probes the Authorization header
+  styles. **Open config.json…** stays for the JSON-only parts (custom
+  sources, OAuth-managed tokens).
+- **Windows port** (`windows/`) — the same sources, parsers, config file,
+  discovery rules, color bands, and dual-ring glyph as a Windows
+  system-tray app (Electron; native tray menus, runtime-generated glyphs).
+  Offline `--parse*` output is byte-identical to the macOS binary on the
+  shared fixtures; unit tests ported to `node --test`; `npm run package:win`
+  builds `QuotaBar.exe` from any OS. Tray icons being icon-only on Windows,
+  the escalating numbers live in the live tooltip instead of beside the
+  glyph.
 - Version row in the menu footer ("QuotaBar v0.10.0"; "(dev build)" when run
   from source without a bundle).
+
+### Removed
+
+- The **Settings…** window (⌘,) — its poll, source, and key fields moved
+  into the dropdown's settings rows.
+- The **Set Token…** menu item — key entry lives in the menu's key fields
+  now, with the z.ai instructions kept in the key field's tooltip. A
+  rejected key surfaces as ⚠︎ z.ai auth instead of a modal alert.
+- Bare-letter menu shortcuts (R, D, Q) — they would fire while typing in the
+  inline key fields; Refresh, Discover, and Quit now require ⌘.
 
 ## [0.10.0] - 2026-08-27
 
