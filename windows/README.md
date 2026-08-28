@@ -23,12 +23,23 @@ Windows **system tray** (notification area) instead of the menu bar.
 
 | macOS | Windows |
 |-------|---------|
-| Menu-bar item shows glyph **+ text** ("41% · 43m") | Tray icons are icon-only on Windows — the glyph's colors carry the band, and the escalating numbers + warning live in the live-updating tooltip |
+| Menu-bar item shows glyph **+ text** ("41% · ↻43m") | Tray icons are icon-only on Windows — the glyph's colors carry the band, and the escalating numbers + warning live in the live-updating tooltip |
 | Attributed menu text (colored bars/percents inline) | Native menus can't color text; each gauge row carries a band-colored ring icon next to the mono block bar |
 | `NSAlert` prompts | Native dialogs / small windows with the same copy |
 | `~/.claude`, `~/.codex`, `~/.config/github-copilot`, … | Same literal paths (tilde = `%USERPROFILE%`), **plus** the Windows-native locations (`%LOCALAPPDATA%\opencode`, `%APPDATA%\github-copilot`, `%APPDATA%\Antigravity`, …) as discovery candidates |
 | Antigravity process scan via `ps`/`lsof` | Same scan via `Get-CimInstance` / `Get-NetTCPConnection` (netstat fallback) |
 | config saved 0600 | `chmod 600` is a no-op on NTFS; the file sits in your profile folder — set ACLs yourself if you share the machine |
+
+## Known parity gaps (as of the macOS 0.11.0 dev cycle)
+
+The macOS app's plan-007 changes land here in a follow-up pass:
+
+- The tray still follows the old status logic — a Z.AI error replaces the
+  rings instead of falling through to a healthy provider
+  (`src/trayapp.js`, same bug macOS fixed in `StatusDisplay.swift`).
+- Z.AI is not toggleable; `sources.zai` is ignored.
+- No per-source status lines, key-clearing buttons, ↻ countdown glyph, or
+  red-band center dot; escalations still read "41% · 43m".
 
 ## Run from source
 

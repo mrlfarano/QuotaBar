@@ -37,3 +37,41 @@ final class UsageBandTests: XCTestCase {
         XCTAssertEqual(gauge.band, .red)
     }
 }
+
+// MARK: - escalation text
+//
+// The ↻ glyph marks the countdown as time-until-reset so "9h24m" can't read
+// as "9h24m of quota left".
+
+final class EscalationTextTests: XCTestCase {
+
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func gauge(pct: Double, resetIn minutes: Double? = nil) -> Gauge {
+        Gauge(id: "fiveHour", label: "5-hour window", pct: pct,
+              resetAt: minutes.map { now + $0 * 60 })
+    }
+
+    func testGreenShowsResetGlyphAndCountdownOnly() {
+        XCTAssertEqual(EscalationText.text(gauge: gauge(pct: 24, resetIn: 2 * 60 + 47), now: now),
+                       "↻2h47m")
+    }
+
+    func testGreenWithoutResetFallsBackToPercent() {
+        XCTAssertEqual(EscalationText.text(gauge: gauge(pct: 24), now: now), "76%")
+    }
+
+    func testYellowAddsColoredPercent() {
+        XCTAssertEqual(EscalationText.text(gauge: gauge(pct: 59, resetIn: 43), now: now),
+                       "41% · ↻43m")
+    }
+
+    func testRedAddsWarningGlyph() {
+        XCTAssertEqual(EscalationText.text(gauge: gauge(pct: 92, resetIn: 12), now: now),
+                       "8% · ↻12m ⚠︎")
+    }
+
+    func testRedWithoutResetStillWarns() {
+        XCTAssertEqual(EscalationText.text(gauge: gauge(pct: 92), now: now), "8% ⚠︎")
+    }
+}

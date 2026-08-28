@@ -389,9 +389,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                      weekRemaining: secondary?.remainingPct,
                                      weekBand: secondary?.band)
         button.attributedTitle = escalationTitle(for: primary, demo: demo)
-        var tip = "Z.AI Coding Plan"
+        var tip = "QuotaBar — outer ring = 5-hour window · inner ring = weekly limit"
         for gauge in gauges {
-            tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used"
+            tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left"
             if let used = gauge.used, let total = gauge.total {
                 tip += " (\(compactCount(used))/\(compactCount(total)) tokens)"
             }
@@ -400,21 +400,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = tip
     }
 
-    /// Escalating text: calm when green, numbers when it matters.
+    /// Escalating text (string spec lives in EscalationText, unit-tested):
+    /// calm when green, numbers when it matters, ↻ marking reset countdowns.
     private func escalationTitle(for gauge: Gauge, demo: Bool) -> NSAttributedString {
         let composed = NSMutableAttributedString()
         let remaining = Int(gauge.remainingPct.rounded())
         let short = shortReset(gauge.resetAt)
         switch gauge.band {
         case .green:
-            composed.append(StatusText.run(short ?? "\(remaining)%",
+            composed.append(StatusText.run(short.map { "↻\($0)" } ?? "\(remaining)%",
                                            color: .labelColor))
         case .yellow, .red:
             composed.append(StatusText.run("\(remaining)%", color: gauge.band.color,
                                            font: StatusText.emphasis))
             if let short {
                 let warning = gauge.band == .red ? " ⚠︎" : ""
-                composed.append(StatusText.run(" · \(short)\(warning)",
+                composed.append(StatusText.run(" · ↻\(short)\(warning)",
                                                color: .labelColor))
             }
         }
@@ -473,7 +474,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 row.append(coloredBlocks(pct: gauge.pct, band: gauge.band))
                 row.append(StatusText.run("  \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left",
                                           color: gauge.band.color, font: menuFont))
-                menu.addItem(attributedDisabledItem(row))
+                menu.addItem(accessibleGaugeItem(row, section: section, gauge: gauge))
 
                 var detail = ""
                 if let used = gauge.used, let total = gauge.total, total > 0 {
@@ -598,6 +599,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    /// Gauge rows carry a readable summary for VoiceOver — the visible bar
+    /// characters would otherwise be read one block at a time. NSMenuItem
+    /// has no native label property, so the subclass overrides the
+    /// accessibility getter.
+    private func accessibleGaugeItem(_ attributed: NSAttributedString,
+                                     section: SourceSection, gauge: Gauge) -> NSMenuItem {
+        let item = AccessibleMenuItem(attributed: attributed)
+        let sectionName = section.title.split(separator: "·").first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? section.title
+        var label = "\(sectionName), \(gauge.label)"
+        label += ": \(Int(gauge.pct.rounded()))% used, \(Int(gauge.remainingPct.rounded()))% left"
+        if let reset = resetText(gauge.resetAt) { label += ", \(reset)" }
+        item.accessibilitySummary = label
+        item.isEnabled = false
+        return item
+    }
+
     private func disabledItem(_ title: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
@@ -633,6 +651,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
+}
+
+// MARK: - Accessibility
+
+/// NSMenuItem exposes no accessibilityLabel property; overriding the
+/// protocol getter lets VoiceOver read a summary instead of the visible
+/// block characters. Best-effort — verified with Accessibility Inspector;
+/// if a macOS build ignores it, the plain-text detail row below each gauge
+/// still carries the numbers.
+final class AccessibleMenuItem: NSMenuItem {
+
+    var accessibilitySummary: String = ""
+
+    init(attributed: NSAttributedString) {
+        super.init(title: "", action: nil, keyEquivalent: "")
+        attributedTitle = attributed
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func accessibilityLabel() -> String? { accessibilitySummary }
 }
 
 // MARK: - Formatting helpers

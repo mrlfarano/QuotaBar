@@ -43,6 +43,26 @@ enum StatusText {
     }
 }
 
+/// The escalating status-bar text as a plain string (unit-tested); the UI
+/// layer colors the runs. Calm when green — countdown only; numbers when it
+/// matters. `↻` marks the countdown as time-until-reset, not quota-left.
+enum EscalationText {
+
+    static func text(gauge: Gauge, now: Date = Date()) -> String {
+        let remaining = Int(gauge.remainingPct.rounded())
+        let short = shortReset(gauge.resetAt, now: now)
+        switch gauge.band {
+        case .green:
+            return short.map { "↻\($0)" } ?? "\(remaining)%"
+        case .yellow, .red:
+            var text = "\(remaining)%"
+            if let short { text += " · ↻\(short)" }
+            if gauge.band == .red { text += " ⚠︎" }
+            return text
+        }
+    }
+}
+
 /// Compact countdown for the status bar: "2h47m" / "47m". `now` is injectable
 /// so tests can assert exact text deterministically.
 func shortReset(_ date: Date?, now: Date = Date()) -> String? {
@@ -78,6 +98,14 @@ func dualRingImage(fiveRemaining: Double?, fiveBand: UsageBand?,
     if fiveRemaining != nil, let fraction = weekRemaining, let color = weekBand?.color {
         strokeArc(center: center, radius: 4.25, lineWidth: 2,
                   fraction: fraction / 100, color: color)
+    }
+    // Shape channel for the critical band: a filled center dot when the
+    // outer ring is red, so the state survives color-vision deficiencies.
+    if let outerBand = fiveBand ?? weekBand, outerBand == .red {
+        let dot = NSBezierPath(ovalIn: NSRect(x: center.x - 2, y: center.y - 2,
+                                              width: 4, height: 4))
+        NSColor.systemRed.setFill()
+        dot.fill()
     }
     image.unlockFocus()
     image.isTemplate = false

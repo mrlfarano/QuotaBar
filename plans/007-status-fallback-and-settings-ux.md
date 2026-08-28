@@ -109,6 +109,16 @@
   completing mid-menu dismissed the user's open menu). `rebuild()` now
   defers the status repaint to `menuDidClose` and `refreshNow()` skips its
   transient "…sync" text while the menu is open.
+- Phase 4 a11y verified structurally: System Events reads the demo menu's
+  gauge rows with their full labels ("Demo data (--demo), 5-hour window:
+  24% used, 76% left, Resets in 2h 43m") — exactly what VoiceOver gets.
+- The live escalation text was read off the running demo bar as
+  `73% · ↻2h46m demo`, confirming the ↻ glyph renders.
+- README screenshot: could not be recaptured from this environment (menus
+  don't stay open under synthetic input here). The stale screenshot (it
+  showed the removed Set Token… row) was removed rather than left
+  misleading; recapture is the author's 10-second next step
+  (`--demo`, open menu, ⌘⇧4, save to docs/screenshot-menu.png).
 
 ## Out of scope
 

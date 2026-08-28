@@ -6,8 +6,45 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **An errored source no longer hijacks the status bar.** A failing Z.AI
+  token (or any selected source's error) now falls through to the next
+  healthy provider's rings; the warning only takes over when nothing is
+  healthy — and then it names the failing source. The README's fallback
+  promise now holds for error states, not just empty ones.
+- **Settings changes landing mid-refresh are no longer dropped.** Pasting a
+  key while a fetch was in flight left it unfetched until the next poll
+  (up to `pollMinutes`); refreshes now re-run when one arrives mid-flight.
+- **An open menu is no longer dismissed by background updates.** Repainting
+  the status item while its menu tracked (demo tick, a refresh completing
+  mid-menu) canceled the popup; repaints now defer until the menu closes.
+
 ### Added
 
+- **Z.AI is toggleable** like every other source — the app is fully usable
+  with no Z.AI account at all. `sources.zai` absent means enabled (old
+  configs decode unchanged); toggling never touches the stored token.
+- **Per-source status lines** under the settings checkboxes — a fetch
+  error (first sentence, 40-char cap), a notice, or a waiting hint; healthy
+  and disabled sources stay silent.
+- **Key clearing** — a × button on key fields with a stored value removes
+  the credential outright (empty field still means "keep").
+- **Settings… ▸ submenu** (⌘,) and **Status Bar Source ▸** — settings left
+  the flat menu so a full provider list can't overflow the screen (menus
+  don't scroll) and sits where people expect it.
+- **Countdown disambiguation** — status-bar countdowns now carry a ↻ glyph
+  (`↻9h24m` = resets in 9h24m, not "9h24m of quota left"); red bands always
+  show the ⚠︎, with or without a countdown.
+- **Colorblind-safe critical state** — a filled center dot joins the red
+  ring, a shape channel alongside color.
+- **VoiceOver labels** on gauge rows (readable summaries instead of block
+  characters), and the status-item tooltip now carries the ring legend and
+  per-gauge "% left".
+- Long section titles, errors, and notices truncate (48 chars; 36 in the
+  picker) so one verbose custom source can't stretch the panel; gauge-label
+  alignment adapts to the longest current label. Poll cadences outside the
+  presets render as their own radio instead of nothing-selected.
 - **Inline settings in the dropdown** — poll cadence (radio row), per-source
   on/off checkboxes, and the directly pasted keys (Z.AI, GitHub, OpenRouter)
   live in the status-item menu itself; there is no separate settings window.
@@ -26,7 +63,9 @@ All notable changes to QuotaBar are documented here. The format follows
   shared fixtures; unit tests ported to `node --test`; `npm run package:win`
   builds `QuotaBar.exe` from any OS. Tray icons being icon-only on Windows,
   the escalating numbers live in the live tooltip instead of beside the
-  glyph.
+  glyph. *Known parity gap: the Windows tray still has the old
+  error-overrides-rings status logic and no Z.AI toggle — macOS fixes from
+  this release land there in a follow-up.*
 - Version row in the menu footer ("QuotaBar v0.10.0"; "(dev build)" when run
   from source without a bundle).
 
@@ -39,6 +78,9 @@ All notable changes to QuotaBar are documented here. The format follows
   rejected key surfaces as ⚠︎ z.ai auth instead of a modal alert.
 - Bare-letter menu shortcuts (R, D, Q) — they would fire while typing in the
   inline key fields; Refresh, Discover, and Quit now require ⌘.
+- The stale menu screenshot from the README (it still showed the removed
+  Set Token… row) — recapture against the Settings ▸ layout before the
+  next release.
 
 ## [0.10.0] - 2026-08-27
 
