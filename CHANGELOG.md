@@ -27,6 +27,16 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ### Added
 
+- **Z.AI token discovery** — Discover Sources (and the launch scan) now
+  finds the z.ai dashboard token where it already lives: browser
+  localStorage. Chromium-family browsers are read from their on-disk
+  LevelDB (Chrome, Canary, Chromium, Brave, Edge, Arc, Comet — ASCII and
+  UTF-16LE records), Firefox from its per-profile SQLite. Also picks up
+  the Claude Code bridge (`ANTHROPIC_BASE_URL` on z.ai →
+  `ANTHROPIC_AUTH_TOKEN`; real Anthropic tokens are never touched).
+  Safari's storage is TCC-protected and deliberately skipped — reading it
+  would prompt for Full Disk Access. Only fills an empty slot; user-set
+  tokens are never overwritten.
 - **Z.AI is toggleable** like every other source — the app is fully usable
   with no Z.AI account at all. `sources.zai` absent means enabled (old
   configs decode unchanged); toggling never touches the stored token.

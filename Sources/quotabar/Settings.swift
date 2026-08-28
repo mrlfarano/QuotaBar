@@ -31,8 +31,10 @@ enum SettingsLogic {
 
     static let keyFields: [(id: String, title: String, tooltip: String)] = [
         ("zai", "Z.AI",
-         "z.ai → usage page → DevTools → Application → Local Storage → "
-         + "\"z-ai-open-platform-token-production\". Stored in ~/.quotabar/config.json (owner-only)."),
+         "Discover Sources (⌘D) scans browser localStorage for the z.ai token "
+         + "first — pasting here is the fallback: z.ai → usage page → DevTools → "
+         + "Application → Local Storage → \"z-ai-open-platform-token-production\". "
+         + "Stored in ~/.quotabar/config.json (owner-only)."),
         ("github", "GitHub",
          "Optional personal-access token; raises the core rate limit from 60/hr to 5,000/hr."),
         ("openrouter", "OpenRouter",

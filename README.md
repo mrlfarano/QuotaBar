@@ -51,7 +51,7 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] ↻9h24m
 
 | Source | Shows | Credential | Endpoint |
 |--------|-------|------------|----------|
-| **Z.AI Coding Plan** (`zai`) | 5h + weekly token windows, MCP monthly, per-model detail | browser token (paste in the menu key fields) | reverse-engineered |
+| **Z.AI Coding Plan** (`zai`) | 5h + weekly token windows, MCP monthly, per-model detail | browser token — **auto-discovered** from browser localStorage, or paste | reverse-engineered |
 | **Claude Pro/Max** (`claude`) | 5h + weekly utilization | Claude Code's OAuth session | reverse-engineered |
 | **Codex / ChatGPT** (`codex`) | 5h + weekly windows, plan tier | Codex CLI's stored token | reverse-engineered |
 | **GitHub Copilot** (`copilot`) | monthly premium requests used vs entitlement | opencode/VS Code auth files, or paste | reverse-engineered |
@@ -73,7 +73,14 @@ healthy, the bar shows a short ⚠︎ warning naming the failing source.
 At launch (and via **Discover Sources**, ⌘D) QuotaBar scans for credentials
 you already have on disk and enables the matching sources:
 
-- `~/.claude/.credentials.json` → `claude`
+- **z.ai's browser token** — the z.ai site keeps its API token in browser
+  localStorage (`z-ai-open-platform-token-production`); QuotaBar reads it
+  from every Chromium-family browser's on-disk storage (Chrome, Canary,
+  Chromium, Brave, Edge, Arc, Comet) and from Firefox — no copy-paste, no
+  Keychain. Safari's storage is TCC-protected and deliberately never read.
+- `~/.claude/.credentials.json` → `claude` — and when Claude Code is
+  pointed at the GLM coding plan (`ANTHROPIC_BASE_URL` on z.ai), its
+  `ANTHROPIC_AUTH_TOKEN` is picked up for `zai` instead
 - `~/.codex/auth.json` → `codex`
 - opencode `~/.local/share/opencode/auth.json` or VS Code
   `~/.config/github-copilot/{hosts,apps}.json` → `copilot`
