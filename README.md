@@ -14,6 +14,8 @@ menu bar that only speaks up when you're about to run out.
 ![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-black)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
 
+<img src="docs/icon-1024.png" width="140" alt="QuotaBar app icon: concentric dual rings on a dark tile">
+
 <img src="docs/screenshot-menu.png" width="380" alt="QuotaBar menu: Z.AI, GitHub, Claude and Codex sections with usage bars, reset countdowns, status-bar source picker">
 
 *One menu, every provider — bars, reset countdowns, and which source drives
