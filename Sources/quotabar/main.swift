@@ -261,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 Task { @MainActor in await self.refreshNow() }
             }
         }
-        if !demoMode {
+        if !demoMode, !menuIsOpen {
             setTransient("…sync")
         }
         if demoMode {
@@ -438,11 +438,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Recompute every menu row from current state. Called on updates. While
     /// the menu is open, mutating items would cancel the popup (and destroy
-    /// any in-progress key edit), so the rebuild is deferred to menuDidClose.
+    /// any in-progress key edit) — and so would repainting the status item
+    /// itself — so everything is deferred to menuDidClose.
     private func rebuild(reason: String) {
         if menuIsOpen {
             menuRebuildPending = true
-            updateStatusItem()
             return
         }
         updateStatusItem()
@@ -452,20 +452,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if sections.isEmpty {
             menu.addItem(disabledItem("No data yet"))
         }
+        // Longest gauge label across sections, so every bar row aligns even
+        // with verbose custom-source labels (floor: the original 13).
+        let labelWidth = max(13, sections.flatMap { $0.gauges.map(\.label.count) }.max() ?? 13)
         for section in sections {
-            menu.addItem(disabledItem(section.title))
+            menu.addItem(disabledItem(truncated(section.title)))
             if let message = section.errorMessage {
-                menu.addItem(disabledItem("⚠︎ \(message)"))
+                menu.addItem(disabledItem("⚠︎ " + truncated(message)))
             } else if section.gauges.isEmpty {
                 menu.addItem(disabledItem("Waiting for data"))
             }
             if let notice = section.notice {
-                menu.addItem(disabledItem(notice))
+                menu.addItem(disabledItem(truncated(notice)))
             }
             for gauge in section.gauges {
                 let menuFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
                 let row = NSMutableAttributedString()
-                row.append(StatusText.run(gauge.label.pad(toWidth: 13) + "  ",
+                row.append(StatusText.run(gauge.label.pad(toWidth: labelWidth) + "  ",
                                           color: .secondaryLabelColor, font: menuFont))
                 row.append(coloredBlocks(pct: gauge.pct, band: gauge.band))
                 row.append(StatusText.run("  \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left",
@@ -494,19 +497,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(updatedRow)
         }
 
-        // Status-bar source picker: every section that currently has data.
+        // Status-bar source picker: every section that currently has data,
+        // in a submenu so a full provider list doesn't stretch the panel.
         let healthyIds = sections.filter { !$0.gauges.isEmpty }.map { $0.id }
         if healthyIds.count > 1 {
-            menu.addItem(disabledItem("Status Bar Source:"))
+            let pickerMenu = NSMenu()
             let active = (config.mainSource ?? "zai").lowercased()
             for id in healthyIds {
-                let name = sections.first(where: { $0.id == id })?.title ?? id
+                let name = truncated(sections.first(where: { $0.id == id })?.title ?? id, max: 36)
                 let item = NSMenuItem(title: name, action: #selector(selectMainSource(_:)), keyEquivalent: "")
                 item.representedObject = id
                 item.target = self
                 item.state = id == active ? .on : .off
-                menu.addItem(item)
+                pickerMenu.addItem(item)
             }
+            let picker = NSMenuItem(title: "Status Bar Source", action: nil, keyEquivalent: "")
+            picker.submenu = pickerMenu
+            menu.addItem(picker)
             menu.addItem(.separator())
         }
 
@@ -529,7 +536,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             discover.target = self
             menu.addItem(discover)
             menu.addItem(.separator())
-            menu.addItem(disabledItem("Settings:"))
+
+            // Settings live in their own submenu: the data menu stays short
+            // (menus don't scroll) and "Settings…" is where people look.
+            let settingsMenu = NSMenu()
             let panel = InlineSettingsPanel(config: config, sections: sections)
             settingsPanel = panel // controls hold targets unowned; keep alive
             panel.onApply = { [weak self] updated in
@@ -540,7 +550,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.rebuild(reason: "settings")
                 Task { @MainActor in await self.refreshNow() }
             }
-            for item in panel.items() { menu.addItem(item) }
+            for item in panel.items() { settingsMenu.addItem(item) }
+            let settings = NSMenuItem(title: "Settings…", action: nil, keyEquivalent: ",")
+            settings.keyEquivalentModifierMask = .command
+            settings.submenu = settingsMenu
+            menu.addItem(settings)
         }
 
         menu.addItem(.separator())
@@ -627,6 +641,13 @@ extension String {
     func pad(toWidth width: Int) -> String {
         count >= width ? self : padding(toLength: width, withPad: " ", startingAt: 0)
     }
+}
+
+/// Cap long single-line menu text — NSMenu sizes the panel to its widest
+/// item, so one verbose custom-source title must not stretch everything.
+func truncated(_ text: String, max: Int = 48) -> String {
+    guard text.count > max else { return text }
+    return String(text.prefix(max - 1)).trimmingCharacters(in: .whitespaces) + "…"
 }
 
 func compactCount(_ value: Double) -> String {

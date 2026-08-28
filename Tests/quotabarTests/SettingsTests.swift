@@ -224,6 +224,18 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(SettingsLogic.shortStatus("exactly fine"), "exactly fine")
     }
 
+    // MARK: menu text helpers
+
+    func testTruncatedCapsAtLimitWithEllipsis() {
+        XCTAssertEqual(truncated("short title"), "short title")
+        XCTAssertEqual(truncated(String(repeating: "x", count: 60)).count, 48)
+        XCTAssertTrue(truncated(String(repeating: "x", count: 60)).hasSuffix("…"))
+        XCTAssertEqual(truncated("word " + String(repeating: "y", count: 60)),
+                       truncated("word " + String(repeating: "y", count: 60)),
+                       "stable for identical inputs")
+        XCTAssertEqual(truncated(String(repeating: "z", count: 50), max: 44).count, 44)
+    }
+
     // MARK: version label
 
     func testVersionLabel() {

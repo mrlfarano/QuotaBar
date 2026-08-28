@@ -90,6 +90,26 @@
    as evidence).
 3. Old `config.json` decodes unchanged (unit test); no migration code.
 
+### Verification log (2026-08-28)
+
+- Gate 1: 58 tests green (baseline was 32).
+- Gate 2 (partial): main menu + Settings ▸ submenu rendered and interacted
+  with in a live demo pass — all controls present (poll radios with correct
+  selection, source grid with correct check states, three key fields, Open
+  config.json…), submenu opens from a real click, demo menu panel ≈446px
+  tall. **Not live-verified:** focus/typing inside a key field while the
+  submenu is open — synthetic-input focus drift made this untestable from
+  the agent harness. Covered indirectly by the documented view-in-menu
+  event contract (NSMenuItem.h), the identical mechanism of the previously
+  shipped flat key fields, and unit tests of the edit round-trip. Author's
+  30-second manual check recommended; fallback (key rows flat, rest in
+  submenu) defined in Phase 3 step 5.
+- Bonus bug found and fixed during verification: repainting the status item
+  while its menu is open cancels menu tracking (demo tick / a live refresh
+  completing mid-menu dismissed the user's open menu). `rebuild()` now
+  defers the status repaint to `menuDidClose` and `refreshNow()` skips its
+  transient "…sync" text while the menu is open.
+
 ## Out of scope
 
 Windows port parity (same fixes needed in `windows/src/trayapp.js` +
