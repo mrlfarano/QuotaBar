@@ -135,6 +135,12 @@ extra headers via `"headers": {…}`, and `resetPath` accepts epoch seconds,
 epoch milliseconds, or ISO8601. Missing `usedPath` defaults to 0; a custom
 source renders exactly like a built-in, no recompile.
 
+**Settings…** (⌘,) in the menu configures the everyday fields from the UI —
+poll cadence and per-source on/off — applied live and saved back to the same
+0600 file; toggling a source never touches its stored credentials. Custom
+sources and tokens stay JSON-first via **Open config.json…**. The menu
+footer shows the running version.
+
 ## Color bands
 
 Applied to quota **remaining** (battery metaphor — red means you're about to

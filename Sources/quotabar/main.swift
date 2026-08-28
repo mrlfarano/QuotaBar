@@ -165,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var config = ConfigStore.load()
     private var snapshot: Snapshot?
     private var sections: [SourceSection] = []
+    private var settingsController: SettingsWindowController?
     private var refreshing = false
     private let demoMode: Bool
     private var demoGauges: [Gauge] = [
@@ -217,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         guard let snap = snapshot else { Task { @MainActor in await refreshNow() }; return }
         let age = Date().timeIntervalSince(snap.fetchedAt)
-        if age >= Double(max(1, config.pollMinutes)) * 60 {
+        if age >= Double(normalizedPollMinutes(config.pollMinutes)) * 60 {
             Task { @MainActor in await refreshNow() }
         }
     }
@@ -516,9 +517,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let discover = NSMenuItem(title: "Discover Sources", action: #selector(discoverSources(_:)), keyEquivalent: "d")
             discover.target = self
             menu.addItem(discover)
+            let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+            settings.target = self
+            menu.addItem(settings)
         }
 
         menu.addItem(.separator())
+        menu.addItem(disabledItem(appVersionLabel()))
         let quit = NSMenuItem(title: "Quit QuotaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
@@ -581,6 +586,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.runModal()
     }
 
+    /// Settings window: shared instance so reopening re-syncs to the live
+    /// config instead of showing stale controls.
+    @objc private func openSettings(_ sender: Any?) {
+        if let settingsController {
+            settingsController.refresh(from: config)
+            settingsController.showWindow(nil)
+        } else {
+            let controller = SettingsWindowController(config: config)
+            controller.onApply = { [weak self] updated in
+                guard let self else { return }
+                self.config = updated
+                self.rebuild(reason: "settings")
+                Task { @MainActor in await self.refreshNow() }
+            }
+            settingsController = controller
+            controller.showWindow(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func setToken(_ sender: Any?) {
         let alert = NSAlert()
         alert.messageText = "Z.AI credential for usage queries"
@@ -637,6 +662,19 @@ func compactCount(_ value: Double) -> String {
     if value >= 1_000_000 { return String(format: "%.1fM", value / 1_000_000) }
     if value >= 1_000 { return String(format: "%.1fk", value / 1_000) }
     return value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+}
+
+/// "QuotaBar v0.10.0" from the bundle's Info.plist. Source builds without a
+/// bundle (`swift run`) have no version and say so.
+func versionLabel(from info: [String: Any]?) -> String {
+    guard let version = info?["CFBundleShortVersionString"] as? String, !version.isEmpty else {
+        return "QuotaBar (dev build)"
+    }
+    return "QuotaBar v\(version)"
+}
+
+func appVersionLabel(bundle: Bundle = .main) -> String {
+    versionLabel(from: bundle.infoDictionary)
 }
 
 func resetText(_ date: Date?, now: Date = Date()) -> String? {

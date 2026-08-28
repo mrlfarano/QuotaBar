@@ -4,6 +4,18 @@ All notable changes to QuotaBar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/)-ish (`MAJOR.MINOR` while pre-1.0).
 
+## [Unreleased]
+
+### Added
+
+- **Settings…** (⌘,) — configure the app from the UI: poll cadence and
+  per-source on/off toggles, applied live and saved through the same 0600
+  config file. Toggling a source never touches its stored credentials or
+  discovery state; **Open config.json…** opens the JSON for the
+  JSON-only parts (custom sources, tokens).
+- Version row in the menu footer ("QuotaBar v0.10.0"; "(dev build)" when run
+  from source without a bundle).
+
 ## [0.10.0] - 2026-08-27
 
 ### Added

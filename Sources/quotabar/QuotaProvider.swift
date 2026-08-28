@@ -98,6 +98,11 @@ func resolvedToken(config: QuotaBarConfig) -> String {
     return config.zaiToken
 }
 
+/// pollMinutes comes from hand-editable JSON, so clamp it to a sane window.
+func normalizedPollMinutes(_ value: Int) -> Int {
+    min(max(value, 1), 60)
+}
+
 enum ConfigStore {
     static var configFileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
