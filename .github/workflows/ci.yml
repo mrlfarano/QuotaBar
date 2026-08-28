@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (release)
+        run: swift build -c release
+
+      # Each --parse* flag exits nonzero when the fixture yields no gauges,
+      # so a silent parser regression fails the step. Output (the gauges
+      # themselves) lands in the job log.
+      - name: Offline parser checks
+        run: |
+          set -euo pipefail
+          bin=".build/release/quotabar"
+          $bin --parse             testdata/payload_real.json
+          $bin --parse             testdata/payload_a.json
+          $bin --parse             testdata/payload_b.json
+          $bin --parse             testdata/payload_c.json
+          $bin --parse-claude      testdata/claude-usage.json
+          $bin --parse-codex       testdata/codex-usage.json
+          $bin --parse-openrouter  testdata/openrouter-credits.json
+          $bin --parse-copilot     testdata/copilot-user.json
+          $bin --parse-antigravity testdata/antigravity-userstatus.json
+          $bin --parse-custom      testdata/custom-config.json testdata/custom-payload.json
+
+      - name: App bundle builds
+        run: ./scripts/make-app.sh

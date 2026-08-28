@@ -9,7 +9,7 @@ different dashboard. QuotaBar shows them all as one quiet 20×20 ring in your
 menu bar that only speaks up when you're about to run out.
 
 [![Release](https://img.shields.io/github/v/release/mrlfarano/QuotaBar)](https://github.com/mrlfarano/QuotaBar/releases/latest)
-[![Build](https://github.com/mrlfarano/QuotaBar/actions/workflows/release.yml/badge.svg)](https://github.com/mrlfarano/QuotaBar/actions/workflows/release.yml)
+[![CI](https://github.com/mrlfarano/QuotaBar/actions/workflows/ci.yml/badge.svg)](https://github.com/mrlfarano/QuotaBar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-black)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
