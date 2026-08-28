@@ -166,7 +166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var snapshot: Snapshot?
     private var sections: [SourceSection] = []
     private var settingsPanel: InlineSettingsPanel?
-    private var refreshing = false
+    private let refreshCoordinator = RefreshCoordinator()
+    /// When the last refresh cycle finished; drives the "Updated" row so it
+    /// stays meaningful even with the z.ai source disabled.
+    private var lastRefreshAt: Date?
     private var menuIsOpen = false
     private var menuRebuildPending = false
     private let demoMode: Bool
@@ -218,8 +221,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rebuild(reason: "demo-tick")
             return
         }
-        guard let snap = snapshot else { Task { @MainActor in await refreshNow() }; return }
-        let age = Date().timeIntervalSince(snap.fetchedAt)
+        guard let fetched = lastRefreshAt else { Task { @MainActor in await refreshNow() }; return }
+        let age = Date().timeIntervalSince(fetched)
         if age >= Double(normalizedPollMinutes(config.pollMinutes)) * 60 {
             Task { @MainActor in await refreshNow() }
         }
@@ -249,9 +252,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor private func refreshNow() async {
-        guard !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
+        // A request arriving mid-flight (e.g. a settings change) re-runs the
+        // cycle instead of being dropped.
+        guard refreshCoordinator.begin() else { return }
+        defer {
+            lastRefreshAt = Date()
+            if refreshCoordinator.end() {
+                Task { @MainActor in await self.refreshNow() }
+            }
+        }
         if !demoMode {
             setTransient("…sync")
         }
@@ -269,14 +278,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        async let zaiSnap = ZaiSource.fetchSnapshot(config: config)
         var built: [SourceSection] = []
-        let zai = await zaiSnap
-        let host = URL(string: config.baseURL)?.host ?? config.baseURL
-        let level = zai.planLevel.map { " (\($0))" } ?? ""
-        built.append(SourceSection(id: "zai", title: "Z.AI Coding Plan\(level) · \(host)",
-                                   gauges: zai.gauges,
-                                   errorMessage: zai.errorMessage))
+        var zaiResult: Snapshot?
+        if SettingsLogic.isSourceEnabled(config, id: "zai") {
+            let zai = await ZaiSource.fetchSnapshot(config: config)
+            zaiResult = zai
+            let host = URL(string: config.baseURL)?.host ?? config.baseURL
+            let level = zai.planLevel.map { " (\($0))" } ?? ""
+            built.append(SourceSection(id: "zai", title: "Z.AI Coding Plan\(level) · \(host)",
+                                       gauges: zai.gauges,
+                                       errorMessage: zai.errorMessage))
+        }
         if config.sources?.github?.enabled ?? true {
             built.append(await GitHubSource.fetch(token: config.sources?.github?.token))
         }
@@ -303,7 +315,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             built.append(await CustomSource.fetch(custom))
         }
         sections = built
-        applySnapshot(zai)
+        if let zai = zaiResult {
+            applySnapshot(zai)
+        } else {
+            rebuild(reason: "applied")
+        }
     }
 
     @MainActor private func applySnapshot(_ snap: Snapshot) {
@@ -332,53 +348,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func loadCachedSnapshot() {
         guard !demoMode,
+              SettingsLogic.isSourceEnabled(config, id: "zai"),
               let data = try? Data(contentsOf: cacheURL),
               let snap = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
         snapshot = snap
+        lastRefreshAt = snap.fetchedAt
     }
 
     // MARK: rendering
 
-    /// Paint the status item: concentric dual-ring glyph + escalating text
-    /// (green = countdown only; yellow/red add the colored percent).
+    /// Paint the status item from the resolver's decision: the selected
+    /// source's rings, a healthy fallback's rings (an errored selection no
+    /// longer hijacks the bar), a short error, or startup idle text.
     private func updateStatusItem() {
         if demoMode {
             if let snap = snapshot, snap.gauges.contains(where: { $0.id == "fiveHour" }) {
-                applyGlyph(snap: snap, demo: true)
+                applyGlyph(gauges: snap.gauges, demo: true)
             } else {
                 setTransient("Z·demo")
             }
             return
         }
-        guard let snap = snapshot else { setTransient("quotabar…"); return }
-        if let message = snap.errorMessage {
-            setTransient(message.contains("token") || message.contains("Unauthorized")
-                         ? "⚠︎ z.ai auth" : "⚠︎ z.ai")
-            return
+        switch StatusDisplayResolver.resolve(sections: sections,
+                                             zaiSnapshot: snapshot,
+                                             mainSource: config.mainSource) {
+        case .gauges(let gauges):
+            applyGlyph(gauges: gauges, demo: false)
+        case .error(let text), .idle(let text):
+            setTransient(text)
         }
-        guard snap.gauges.contains(where: { $0.id == "fiveHour" || $0.id == "week" }) else {
-            setTransient("z.ai")
-            return
-        }
-        applyGlyph(snap: snap, demo: false)
     }
 
-    /// Gauges driving the status bar: the source selected by config.mainSource
-    /// (or "zai" default), falling back to z.ai, then any healthy section.
-    private var statusGauges: [Gauge]? {
-        let wanted = (config.mainSource ?? "zai").lowercased()
-        if let match = sections.first(where: { $0.id == wanted && !$0.gauges.isEmpty }) {
-            return match.gauges
-        }
-        if let zai = sections.first(where: { $0.id == "zai" && !$0.gauges.isEmpty }) {
-            return zai.gauges
-        }
-        return sections.first(where: { !$0.gauges.isEmpty })?.gauges
-    }
-
-    private func applyGlyph(snap: Snapshot, demo: Bool) {
+    private func applyGlyph(gauges: [Gauge], demo: Bool) {
         guard let button = statusItem.button else { return }
-        let gauges = demo ? snap.gauges : statusGauges ?? snap.gauges
         guard !gauges.isEmpty else { setTransient("⚠︎ no data"); return }
         let primary = gauges[0]
         let secondary = gauges.count > 1 ? gauges[1] : nil
@@ -486,7 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             menu.addItem(.separator())
         }
-        if snapshot != nil {
+        if lastRefreshAt != nil {
             let updatedRow = disabledItem("Updated —")
             updatedRow.representedObject = "updated-row"
             menu.addItem(updatedRow)
@@ -566,9 +568,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         for item in menu.items where item.representedObject as? String == "updated-row" {
-            if let snap = snapshot {
-                let age = Int(Date().timeIntervalSince(snap.fetchedAt) / 60)
-                item.title = "Updated \(formatter.string(from: snap.fetchedAt)) (\(age <= 0 ? "just now" : "\(age)m ago")), poll \(config.pollMinutes)m"
+            if let fetched = lastRefreshAt {
+                let age = Int(Date().timeIntervalSince(fetched) / 60)
+                item.title = "Updated \(formatter.string(from: fetched)) (\(age <= 0 ? "just now" : "\(age)m ago")), poll \(config.pollMinutes)m"
             } else {
                 item.title = "No data yet"
             }

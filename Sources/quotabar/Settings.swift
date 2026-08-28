@@ -19,6 +19,7 @@ enum SettingsLogic {
     static let pollChoices = [1, 2, 5, 10, 15, 30]
 
     static let toggleableSources: [(id: String, title: String)] = [
+        ("zai", "Z.AI Coding Plan"),
         ("github", "GitHub API"),
         ("claude", "Claude Pro/Max"),
         ("codex", "Codex / ChatGPT"),
@@ -67,6 +68,11 @@ enum SettingsLogic {
         case "zai":
             config.zaiToken = key
             config.authScheme = nil
+            // Fresh entry carries the enabled default; an existing one keeps
+            // its flag (an explicit opt-out survives key entry, as with the
+            // other key fields).
+            if config.sources == nil { config.sources = SourcesConfig() }
+            if config.sources?.zai == nil { config.sources?.zai = OAuthSourceConfig() }
         case "github":
             if config.sources == nil { config.sources = SourcesConfig() }
             var github = config.sources?.github ?? GitHubSourceConfig()
@@ -84,10 +90,12 @@ enum SettingsLogic {
 
     // MARK: enable-state logic (pure; unit-tested)
 
-    /// Mirrors the fetch gates in AppDelegate: GitHub polls unless explicitly
-    /// disabled; OAuth-backed sources only poll when explicitly enabled.
+    /// Mirrors the fetch gates in AppDelegate: Z.AI and GitHub poll unless
+    /// explicitly disabled; OAuth-backed sources only poll when explicitly
+    /// enabled (discovery or a pasted key creates that entry).
     static func isSourceEnabled(_ config: QuotaBarConfig, id: String) -> Bool {
         switch id {
+        case "zai": return config.sources?.zai?.enabled ?? true
         case "github": return config.sources?.github?.enabled ?? true
         case "claude": return config.sources?.claude?.enabled ?? false
         case "codex": return config.sources?.codex?.enabled ?? false
@@ -109,6 +117,9 @@ enum SettingsLogic {
             return source
         }
         switch id {
+        case "zai":
+            let source = oauth(config.sources?.zai)
+            config.sources?.zai = source
         case "github":
             var github = config.sources?.github ?? GitHubSourceConfig()
             github.enabled = enabled

@@ -98,6 +98,8 @@ final class SettingsTests: XCTestCase {
 
     func testDefaultEnabledStatesMirrorFetchGates() {
         let config = QuotaBarConfig()
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(config, id: "zai"),
+                      "Z.AI polls by default (token at top level, entry absent)")
         XCTAssertTrue(SettingsLogic.isSourceEnabled(config, id: "github"),
                       "GitHub polls by default")
         for id in ["claude", "codex", "openrouter", "copilot", "antigravity"] {
@@ -105,6 +107,46 @@ final class SettingsTests: XCTestCase {
                            "\(id) stays off until discovered or enabled")
         }
         XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "unknown"))
+    }
+
+    // MARK: Z.AI toggle (token lives at the top level, enable state in sources)
+
+    func testZaiTogglePreservesTopLevelToken() {
+        var config = QuotaBarConfig()
+        config.zaiToken = "z-secret"
+        config = SettingsLogic.setSourceEnabled(config, id: "zai", enabled: false)
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "zai"))
+        XCTAssertEqual(config.zaiToken, "z-secret", "toggling must not touch the token")
+
+        config = SettingsLogic.setSourceEnabled(config, id: "zai", enabled: true)
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(config, id: "zai"))
+        XCTAssertEqual(config.zaiToken, "z-secret")
+    }
+
+    func testLegacyConfigWithoutZaiEntryDecodesEnabled() throws {
+        let legacy = #"{"zaiToken":"z1","baseURL":"https://api.z.ai","pollMinutes":5,"sources":{"github":{"enabled":true,"token":""}}}"#
+        let config = try JSONDecoder().decode(QuotaBarConfig.self, from: Data(legacy.utf8))
+        XCTAssertNil(config.sources?.zai, "no zai key in old configs")
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(config, id: "zai"),
+                      "absent entry means enabled — no migration needed")
+    }
+
+    func testSetKeyZaiCreatesEnabledEntryOnDemand() {
+        let config = QuotaBarConfig() // sources nil
+        let updated = SettingsLogic.setKey(config, id: "zai", key: "z1")
+        XCTAssertEqual(updated.zaiToken, "z1")
+        XCTAssertTrue(SettingsLogic.isSourceEnabled(updated, id: "zai"),
+                      "pasting a key into a fresh struct keeps its enabled-by-default state")
+    }
+
+    func testSetKeyZaiKeepsExplicitOptOut() {
+        var config = QuotaBarConfig()
+        config.sources = SourcesConfig()
+        config.sources?.zai = OAuthSourceConfig(enabled: false)
+        config = SettingsLogic.setKey(config, id: "zai", key: "z1")
+        XCTAssertFalse(SettingsLogic.isSourceEnabled(config, id: "zai"),
+                       "an explicit opt-out survives key entry, as with the other fields")
+        XCTAssertEqual(config.zaiToken, "z1")
     }
 
     func testTogglePreservesStoredCredentials() {
