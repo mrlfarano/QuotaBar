@@ -129,6 +129,14 @@
   NSMenu's field editor (tried AX set-focused, AX click, keystroke; the
   field editor only engages for real hardware mouse-down). Author's manual
   paste remains the final gate for that single interaction.
+- Field report from the author's manual paste: the token never reached the
+  config — the paste was real, the save wasn't. Root cause: the key commit
+  only ran on `controlTextDidEndEditing`, which never fires when menu
+  tracking swallows Return or the menu (Escape/click-away) tears the field
+  down. Fixed with a commit-on-menu-close sweep
+  (`InlineSettingsPanel.commitPendingKeyEdits()` called from
+  `menuDidClose`), with regression tests for both lost-paste paths. This
+  retroactively explains earlier confusion about keys "not restoring".
 
 ## Out of scope
 

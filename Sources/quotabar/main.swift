@@ -572,6 +572,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         menuIsOpen = false
+        // Return can be swallowed by menu tracking and Escape tears key
+        // fields down without an end-editing event — commit pastes first.
+        settingsPanel?.commitPendingKeyEdits()
         guard menuRebuildPending else { return }
         menuRebuildPending = false
         rebuild(reason: "menu-closed")

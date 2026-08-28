@@ -19,6 +19,11 @@ All notable changes to QuotaBar are documented here. The format follows
 - **An open menu is no longer dismissed by background updates.** Repainting
   the status item while its menu tracked (demo tick, a refresh completing
   mid-menu) canceled the popup; repaints now defer until the menu closes.
+- **Pasted keys are no longer lost when the menu closes.** Menu tracking can
+  swallow Return and closing the menu (or Escape) tears a key field down
+  without an end-editing event — a pasted token silently vanished. Pending
+  key edits are now committed the moment the menu closes (found live during
+  the 0.11.0 build pass: a real paste never reached the config).
 
 ### Added
 

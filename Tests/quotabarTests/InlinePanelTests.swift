@@ -172,4 +172,44 @@ final class InlinePanelTests: XCTestCase {
                                   containing: "run `claude` once").isEmpty,
                        "the settings grid carries the short error")
     }
+
+    // MARK: commit-on-menu-close (pastes survive Return being swallowed)
+
+    func testPendingKeyEditCommitsOnMenuClose() {
+        var config = QuotaBarConfig()
+        config.zaiToken = "old-token-abcde"
+        let panel = InlineSettingsPanel(config: config)
+        var applied: [QuotaBarConfig] = []
+        panel.onApply = { applied.append($0) }
+
+        let field = findTextFields(in: allViews(of: panel)[2], id: "zai").first!
+        // User enters the field (mask clears), pastes, and the menu closes
+        // with NO end-editing event — Return swallowed or Escape teardown.
+        panel.controlTextDidBeginEditing(
+            Notification(name: NSControl.textDidBeginEditingNotification, object: field))
+        field.stringValue = "fresh-paste-98765"
+        panel.commitPendingKeyEdits()
+
+        XCTAssertEqual(applied.last?.zaiToken, "fresh-paste-98765",
+                       "the paste must not be lost when the menu closes")
+        XCTAssertEqual(field.stringValue, "********98765", "re-masked after commit")
+    }
+
+    func testCommitSweepIgnoresUntouchedAndEmptyFields() {
+        var config = QuotaBarConfig()
+        config.zaiToken = "old-token-abcde"
+        let panel = InlineSettingsPanel(config: config)
+        var applied: [QuotaBarConfig] = []
+        panel.onApply = { applied.append($0) }
+
+        panel.commitPendingKeyEdits()
+        XCTAssertEqual(applied.count, 0, "an untouched field (mask displayed) applies nothing")
+
+        let field = findTextFields(in: allViews(of: panel)[2], id: "zai").first!
+        panel.controlTextDidBeginEditing(
+            Notification(name: NSControl.textDidBeginEditingNotification, object: field))
+        panel.commitPendingKeyEdits()
+        XCTAssertEqual(applied.count, 0, "an empty entry keeps the stored key")
+        XCTAssertEqual(field.stringValue, "********abcde", "mask restored on the empty round-trip")
+    }
 }

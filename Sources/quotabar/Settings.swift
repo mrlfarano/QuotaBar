@@ -355,6 +355,13 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let input = obj.object as? NSTextField,
               let id = input.identifier?.rawValue else { return }
+        commitKeyEdit(id: id)
+    }
+
+    /// Store one key field's current text. Shared by the end-editing
+    /// delegate and the menu-close sweep below.
+    private func commitKeyEdit(id: String) {
+        guard let input = keyInputs[id] else { return }
         let candidate = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let current = SettingsLogic.keyValue(config, id: id)
         // Untouched field (mask still in place, no editing session began)
@@ -366,6 +373,15 @@ final class InlineSettingsPanel: NSObject, NSTextFieldDelegate {
         config = SettingsLogic.setKey(config, id: id, key: candidate)
         apply()
         input.stringValue = SettingsLogic.maskedKey(SettingsLogic.keyValue(config, id: id))
+    }
+
+    /// Commit key edits that never saw their end-editing event: menu
+    /// tracking can swallow Return, and closing the menu (or Escape) tears
+    /// the field down silently — without this sweep a pasted key would be
+    /// lost. The app delegate calls it the moment the menu closes, before
+    /// rebuilding.
+    func commitPendingKeyEdits() {
+        for id in keyInputs.keys { commitKeyEdit(id: id) }
     }
 
     // MARK: actions
