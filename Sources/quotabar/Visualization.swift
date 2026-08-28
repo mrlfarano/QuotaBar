@@ -43,10 +43,11 @@ enum StatusText {
     }
 }
 
-/// Compact countdown for the status bar: "2h47m" / "47m".
-func shortReset(_ date: Date?) -> String? {
+/// Compact countdown for the status bar: "2h47m" / "47m". `now` is injectable
+/// so tests can assert exact text deterministically.
+func shortReset(_ date: Date?, now: Date = Date()) -> String? {
     guard let date else { return nil }
-    let interval = date.timeIntervalSinceNow
+    let interval = date.timeIntervalSince(now)
     guard interval > 0 else { return nil }
     let minutes = Int(interval) / 60
     if minutes >= 60 { return "\(minutes / 60)h\(String(format: "%02d", minutes % 60))m" }

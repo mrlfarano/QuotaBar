@@ -44,14 +44,17 @@ final class CustomSourcePathTests: XCTestCase {
     }
 
     func testShortResetAndResetText() {
+        let now = Date(timeIntervalSince1970: 1_787_862_451)
         XCTAssertNil(shortReset(nil))
-        XCTAssertNil(shortReset(Date().addingTimeInterval(-60)), "past resets hide from the status bar")
-        XCTAssertEqual(shortReset(Date().addingTimeInterval(47 * 60)), "47m")
-        XCTAssertEqual(shortReset(Date().addingTimeInterval(2 * 3600 + 47 * 60)), "2h47m")
+        XCTAssertNil(shortReset(now.addingTimeInterval(-60), now: now),
+                     "past resets hide from the status bar")
+        XCTAssertEqual(shortReset(now.addingTimeInterval(47 * 60), now: now), "47m")
+        XCTAssertEqual(shortReset(now.addingTimeInterval(2 * 3600 + 47 * 60), now: now), "2h47m")
 
-        XCTAssertEqual(resetText(Date().addingTimeInterval(-1)), "Reset time reached")
-        XCTAssertEqual(resetText(Date().addingTimeInterval(2 * 3600 + 47 * 60)), "Resets in 2h 47m")
-        XCTAssertEqual(resetText(Date().addingTimeInterval(5 * 60)), "Resets in 5m")
+        XCTAssertEqual(resetText(now.addingTimeInterval(-1), now: now), "Reset time reached")
+        XCTAssertEqual(resetText(now.addingTimeInterval(2 * 3600 + 47 * 60), now: now),
+                       "Resets in 2h 47m")
+        XCTAssertEqual(resetText(now.addingTimeInterval(5 * 60), now: now), "Resets in 5m")
         XCTAssertNil(resetText(nil))
     }
 

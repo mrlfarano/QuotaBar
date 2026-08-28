@@ -639,9 +639,9 @@ func compactCount(_ value: Double) -> String {
     return value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
 }
 
-func resetText(_ date: Date?) -> String? {
+func resetText(_ date: Date?, now: Date = Date()) -> String? {
     guard let date else { return nil }
-    let interval = date.timeIntervalSinceNow
+    let interval = date.timeIntervalSince(now)
     if interval <= 0 { return "Reset time reached" }
     let hours = Int(interval) / 3600
     let minutes = (Int(interval) % 3600) / 60
