@@ -24,7 +24,8 @@ sections in the README.
   Failures return a section with `errorMessage` — sources never throw and
   never crash the app.
 - **Offline checks required.** New or changed parsers need a fixture in
-  `testdata/` plus a `--parse-*` code path that prints gauges deterministically.
+  `testdata/` plus a `--parse-*` code path that prints gauges deterministically,
+  and unit-test coverage in `Tests/quotabarTests/` for the pure parsing logic.
 - **Secrets stay out.** Never commit real tokens, captured responses with
   account identifiers, or keychain-reading code. Sanitize fixtures
   (`REDACTED-*` placeholders are the convention).
@@ -39,8 +40,9 @@ sections in the README.
 
 1. Fork + branch from `master`.
 2. Keep the change small; one source/feature per PR.
-3. Verify: `swift build -c release` clean, offline `--parse-*` checks pass,
-   and (if touching a live source) the matching `--probe <source>` works.
+3. Verify: `swift build -c release` clean, `swift test` green, offline
+   `--parse-*` checks pass, and (if touching a live source) the matching
+   `--probe <source>` works.
 4. Describe what you tested and paste the probe output.
 
 ## Reporting bugs

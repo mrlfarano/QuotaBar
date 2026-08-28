@@ -18,6 +18,9 @@ jobs:
       - name: Build (release)
         run: swift build -c release
 
+      - name: Unit tests
+        run: swift test
+
       # Each --parse* flag exits nonzero when the fixture yields no gauges,
       # so a silent parser regression fails the step. Output (the gauges
       # themselves) lands in the job log.

@@ -162,6 +162,7 @@ never writes to the CLIs' own credential files.
 
 ```sh
 swift build -c release
+swift test                           # unit tests (Tests/quotabarTests/)
 .build/release/quotabar --demo        # synthetic data, offline
 .build/release/quotabar --probe [zai|claude|codex|copilot|openrouter|antigravity]
 .build/release/quotabar --parse testdata/payload_real.json        # offline parser checks
