@@ -4,7 +4,7 @@ All notable changes to QuotaBar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/)-ish (`MAJOR.MINOR` while pre-1.0).
 
-## [Unreleased]
+## [0.11.0] - 2026-08-28
 
 ### Fixed
 
