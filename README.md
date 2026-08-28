@@ -170,6 +170,7 @@ swift build -c release
 .build/release/quotabar --parse-copilot testdata/copilot-user.json
 .build/release/quotabar --parse-openrouter testdata/openrouter-credits.json
 .build/release/quotabar --parse-antigravity testdata/antigravity-userstatus.json
+scripts/make-icon.sh                # regenerate Resources/AppIcon.icns
 ```
 
 Project layout: `Sources/quotabar/` — one `enum XSource` per provider

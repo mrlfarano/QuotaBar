@@ -8,8 +8,13 @@ swift build -c release
 APP="build/QuotaBar.app"
 VERSION="${VERSION:-0.1.0}"   # release workflow passes the tag, e.g. v0.8.0
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/quotabar "$APP/Contents/MacOS/quotabar"
+if [ -f Resources/AppIcon.icns ]; then
+  cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+else
+  echo "warning: Resources/AppIcon.icns missing — run scripts/make-icon.sh" >&2
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -20,6 +25,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key>                <string>QuotaBar</string>
     <key>CFBundleExecutable</key>          <string>quotabar</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
+    <key>CFBundleIconFile</key>            <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>  <string>${VERSION#v}</string>
     <key>LSUIElement</key>                 <true/>
     <key>NSHighResolutionCapable</key>     <true/>
