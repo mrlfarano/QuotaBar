@@ -33,7 +33,9 @@ export function runDiscovery(inputConfig, env = process.env, deps = {}) {
   // Z.AI — first-class: the dashboard token lives in browser localStorage
   // (see zaitoken.js). Only fills an empty slot; a user-set token is never
   // overwritten (the on/off toggle gates fetching, not discovery).
-  if ((config.zaiToken ?? '') !== '') {
+  if (config.sources.zai?.enabled === false) {
+    outcome.lines.push('zai: disabled; discovery skipped');
+  } else if ((config.zaiToken ?? '') !== '') {
     outcome.lines.push('zai: token already set');
   } else {
     const found = findZaiToken();

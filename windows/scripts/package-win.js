@@ -49,6 +49,7 @@ const paths = await packager({
     /\/build\//,
     /\/test(?:\/|$)/,
     /\/scripts(?:\/|$)/,
+    /\.log$/i,
     /\.git$/u,
   ],
 });
