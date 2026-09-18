@@ -102,7 +102,7 @@ packaged executable checks live in `test/package/`. CI and releases run all thre
 layers. Coverage reports measure loaded Node modules, not overall GUI coverage;
 no numeric coverage threshold is enforced.
 
-CI captures stdout, stderr, and exit status for all ten Swift fixture commands
+CI captures stdout, stderr, and exit status for all eleven Swift fixture commands
 on macOS, then compares Windows Node output against that artifact using
 `scripts/parser-parity.js`. Any difference fails CI. Both PRs and pushes to
 `main` run this gate.

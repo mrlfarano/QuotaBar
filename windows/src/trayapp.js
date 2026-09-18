@@ -243,7 +243,7 @@ export class QuotaBarApp {
     const primary = gauges[0];
     const secondary = gauges.length > 1 ? gauges[1] : null;
 
-    // Dual-ring glyph: outer = primary (5h), inner = weekly, colors escalate.
+    // Outer = first available window, inner = second (when present).
     const icon = nativeImage.createEmpty();
     icon.addRepresentation({ scaleFactor: 1, buffer: dualRingPNG({
       size: 16,

@@ -329,6 +329,31 @@ async function main() {
       } finally { other.destroy(); }
     });
 
+    await check('Codex Pro weekly-only response appears correctly in native tray menu and tooltip', async () => {
+      const originalFetch = globalThis.fetch;
+      const originalTooltip = controller.tray.setToolTip;
+      let tooltip;
+      controller.demoMode = false;
+      controller.config = { ...defaultConfig(), mainSource: 'codex', sources: {
+        zai: { enabled: false }, github: { enabled: false }, codex: { enabled: true, token: 'REDACTED-pro', discovered: false },
+      } };
+      globalThis.fetch = async () => new Response(fs.readFileSync(new URL('../../../testdata/codex-pro-weekly.json', import.meta.url), 'utf8'));
+      controller.tray.setToolTip = (value) => { tooltip = value; originalTooltip.call(controller.tray, value); };
+      try {
+        await controller.refreshNow();
+        assert.deepEqual(controller.sections[0].gauges.map((g) => g.id), ['codex-weekly']);
+        const labels = controller.buildMenu().items.map((item) => item.label).join('\n');
+        assert.match(labels, /Weekly limit/);
+        assert.doesNotMatch(labels, /5-hour window/);
+        assert.match(tooltip, /outer ring = weekly limit/);
+        assert.match(tooltip, /90% left/);
+        assert.doesNotMatch(tooltip, /5-hour|inner ring/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        controller.tray.setToolTip = originalTooltip;
+      }
+    });
+
     await check('live controller caches snapshots and respects disabled sources', async () => {
       controller.demoMode = false;
       controller.config = { ...defaultConfig(), sources: { zai: { enabled: false }, github: { enabled: false } } };

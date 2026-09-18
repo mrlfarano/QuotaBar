@@ -6,7 +6,8 @@ Windows parity implementation, packaging, and automated test suites are complete
 in the working branch. Core tests, real Electron settings/tray integration, and
 packaged CLI checks pass locally. Node.js 22.12+ is required by Electron 44.
 CI now targets `main`, captures Swift fixture output on macOS, and compares all
-ten Windows outputs byte-for-byte. Release jobs run tests before uploading.
+eleven Windows outputs byte-for-byte, including weekly-only Codex Pro. Release
+jobs run tests before uploading.
 
 Windows discovery refreshes silently. Settings includes advanced provider
 credentials, tray selection, endpoint options, and custom-source editing with

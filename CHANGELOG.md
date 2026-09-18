@@ -8,6 +8,9 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ### Windows verification and regression fixes
 
+- Fixed Codex Pro weekly quotas being labeled as five-hour windows when the
+  backend returns the weekly limit as `primary_window`. Both platforms use
+  the reported duration, and tray legends reflect the actual quota windows.
 - Discover Sources now refreshes the tray without opening a results alert.
 - Reworked Windows Settings into General, Sources, and Advanced tabs with fixed
   provider rows, consistent controls, and a persistent advanced save bar. Removed
@@ -17,7 +20,7 @@ All notable changes to QuotaBar are documented here. The format follows
   provider credentials, and custom-source editing. Advanced edits validate
   before saving, retain masked credentials, and report errors inline.
 - Added core, provider/auth, persistence, discovery, CLI, PNG/ICO, real Electron
-  UI/IPC, and packaged-executable test suites. CI compares all ten Windows
+  UI/IPC, and packaged-executable test suites. CI compares all eleven Windows
   fixture outputs against a macOS Swift artifact and runs on `main`.
 - Fixed localhost TLS certificate handling, discovery overriding disabled
   GitHub/OpenRouter sources, Start at login event routing, accumulated settings

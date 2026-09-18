@@ -14,6 +14,34 @@ import { fixture, isolatedHome, writeJSON, mockFetch } from './helpers.js';
 
 const config = { enabled: true, token: 'REDACTED-token', discovered: false, accountId: 'REDACTED-account' };
 
+test('Codex Pro weekly-only primary window keeps its duration, usage and reset', async (t) => {
+  isolatedHome(t);
+  mockFetch(t, [{ body: fixture('codex-pro-weekly') }]);
+  const { section } = await Codex.fetch(config);
+  assert.equal(section.title, 'Codex (pro) · usage');
+  assert.equal(section.errorMessage, undefined);
+  assert.deepEqual(section.gauges.map(({ id, label, pct }) => ({ id, label, pct })), [
+    { id: 'codex-weekly', label: 'Weekly limit', pct: 10 },
+  ]);
+  assert.equal(section.gauges[0].resetAt.getTime(), 1788272109000);
+});
+
+test('Codex durations override window positions, including zero usage and numeric strings', () => {
+  const gauges = Codex.gaugesFromRoot({ rate_limit: {
+    primary_window: { used_percent: 0, limit_window_seconds: '604800' },
+    secondary_window: { used_percent: 25, limit_window_seconds: 18000 },
+  } });
+  assert.deepEqual(gauges.map((g) => g.id), ['codex-weekly', 'codex-5h']);
+  assert.deepEqual(gauges.map((g) => g.pct), [0, 25]);
+});
+
+test('Codex keeps legacy labels when duration is absent', () => {
+  const gauges = Codex.gaugesFromRoot({ rate_limit: {
+    primary_window: { used_percent: 0 }, secondary_window: { used_percent: 36 },
+  } });
+  assert.deepEqual(gauges.map((g) => g.id), ['codex-5h', 'codex-weekly']);
+});
+
 for (const [name, source, payload, ids, percentages] of [
   ['Claude', Claude, 'claude-usage', ['claude-5h', 'claude-weekly'], [41.2, 17.8]],
   ['Codex', Codex, 'codex-usage', ['codex-5h', 'codex-weekly'], [0, 36]],

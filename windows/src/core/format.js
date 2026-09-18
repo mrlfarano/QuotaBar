@@ -121,7 +121,8 @@ export function escalationText(gauge, now = new Date()) {
 /// (parity with the macOS tooltip). Callers truncate to the OS's
 /// 128-character budget.
 export function tooltipText({ title, gauges, now = new Date() }) {
-  const lines = [`${title} — outer ring = 5-hour window · inner ring = weekly limit`];
+  const legend = gauges.slice(0, 2).map((gauge, index) => `${index === 0 ? 'outer' : 'inner'} ring = ${gauge.label.toLowerCase()}`).join(' · ');
+  const lines = [legend ? `${title} — ${legend}` : title];
   if (gauges.length > 0) lines.push(escalationText(gauges[0], now));
   for (const gauge of gauges) {
     let line = `${gauge.label}: ${Math.round(gauge.pct)}% used · ${Math.round(remainingPct(gauge.pct))}% left`;

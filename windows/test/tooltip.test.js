@@ -50,13 +50,23 @@ test('tooltip: title + legend first, escalation, then per-gauge lines', () => {
   assert.equal(lines[3], 'Weekly limit: 42% used · 58% left (5.0k/12.0k tokens) · Resets in 72h 0m');
 });
 
-test('tooltip works for a single gauge (no weekly ring)', () => {
+test('tooltip works for a single gauge without inventing an inner ring', () => {
   const tip = tooltipText({ title: 'GitHub API · rate limit', gauges: [
     gauge(8, { used: 5, total: 60, id: 'gh-core', label: 'Core requests', resetAt: inMinutes(40) }),
   ], now: NOW });
   const lines = tip.split('\n');
   assert.equal(lines.length, 3);
+  assert.equal(lines[0], 'GitHub API · rate limit — outer ring = core requests');
   assert.equal(lines[2], 'Core requests: 8% used · 92% left (5/60 tokens) · Resets in 40m');
+});
+
+test('weekly-only Codex tooltip labels the outer ring as weekly', () => {
+  const tip = tooltipText({ title: 'Codex (pro) · usage', gauges: [
+    gauge(10, { id: 'codex-weekly', label: 'Weekly limit', resetAt: inMinutes(600) }),
+  ], now: NOW });
+  assert.equal(tip.split('\n')[0], 'Codex (pro) · usage — outer ring = weekly limit');
+  assert.match(tip, /Weekly limit: 10% used · 90% left/);
+  assert.doesNotMatch(tip, /5-hour|inner ring/);
 });
 
 // MARK: menu hygiene helpers

@@ -8,8 +8,9 @@ import Foundation
 //   GET https://chatgpt.com/backend-api/wham/usage
 //   Authorization: Bearer <access token>
 //   ChatGPT-Account-Id: <account uuid>
-// Response: rate_limit.primary_window (5h) / secondary_window (weekly), each
-// with used_percent (0-100), reset_after_seconds, reset_at (epoch seconds).
+// Response: rate_limit windows identify their duration with limit_window_seconds;
+// a weekly-only Pro quota may occupy primary_window. Each window includes
+// used_percent (0-100), reset_after_seconds, reset_at (epoch seconds).
 // Token chain: config token → ~/.codex/auth.json → refresh via
 // auth.openai.com/oauth/token (rotated tokens persisted in OUR config; the
 // CLI's auth.json is never written).
@@ -80,10 +81,13 @@ enum CodexSource {
     static func gauges(from root: [String: Any]) -> [Gauge] {
         guard let rateLimit = root["rate_limit"] as? [String: Any] else { return [] }
         var gauges: [Gauge] = []
-        for (key, gaugeID, label) in [("primary_window", "codex-5h", "5-hour window"),
+        for (key, fallbackID, fallbackLabel) in [("primary_window", "codex-5h", "5-hour window"),
                                       ("secondary_window", "codex-weekly", "Weekly limit")] {
             guard let window = rateLimit[key] as? [String: Any],
                   let used = QuotaResponseParser.number(window["used_percent"]) else { continue }
+            let seconds = QuotaResponseParser.number(window["limit_window_seconds"])
+            let (gaugeID, label) = seconds == 604800 ? ("codex-weekly", "Weekly limit")
+                : seconds == 18000 ? ("codex-5h", "5-hour window") : (fallbackID, fallbackLabel)
             var gauge = Gauge(id: gaugeID, label: label, pct: used,
                               resetAt: QuotaResponseParser.date(window["reset_at"]))
             gauge.clampToHundred()

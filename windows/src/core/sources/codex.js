@@ -79,10 +79,15 @@ export function gaugesFromRoot(root) {
   const rateLimit = root.rate_limit;
   if (!rateLimit || typeof rateLimit !== 'object' || Array.isArray(rateLimit)) return [];
   const gauges = [];
-  for (const [key, gaugeID, label] of [['primary_window', 'codex-5h', '5-hour window'], ['secondary_window', 'codex-weekly', 'Weekly limit']]) {
+  for (const [key, fallbackID, fallbackLabel] of [['primary_window', 'codex-5h', '5-hour window'], ['secondary_window', 'codex-weekly', 'Weekly limit']]) {
     const window_ = rateLimit[key];
     const used = leafNumber(window_?.used_percent);
     if (used === null) continue;
+    // Pro can return its weekly quota as the only (primary) window.
+    // Retain the positional fallback for older responses without a duration.
+    const seconds = leafNumber(window_.limit_window_seconds);
+    const [gaugeID, label] = seconds === 604800 ? ['codex-weekly', 'Weekly limit']
+      : seconds === 18000 ? ['codex-5h', '5-hour window'] : [fallbackID, fallbackLabel];
     gauges.push(gauge(gaugeID, label, used, { resetAt: leafDate(window_.reset_at) }));
   }
   return gauges;

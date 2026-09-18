@@ -12,6 +12,7 @@ export const cases = [
     `--parse-${name}`, [['claude-usage.json', 'codex-usage.json', 'openrouter-credits.json', 'copilot-user.json', 'antigravity-userstatus.json'][index]],
   ]),
   ['--parse-custom', ['custom-config.json', 'custom-payload.json']],
+  ['--parse-codex', ['codex-pro-weekly.json']],
 ];
 
 export function capture(command, prefix = []) {

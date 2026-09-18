@@ -18,6 +18,7 @@ function run(...args) {
 for (const [flag, file, expected] of [
   ['--parse-claude', 'claude-usage', /claude-5h=41% resets@\d+ claude-weekly=18% resets@\d+\n$/],
   ['--parse-codex', 'codex-usage', /^codex-5h=0% resets@1787862451 codex-weekly=36% resets@1788272109\n$/],
+  ['--parse-codex', 'codex-pro-weekly', /^codex-weekly=10% resets@1788272109\n$/],
   ['--parse-openrouter', 'openrouter-credits', /^openrouter-credits=33%\n$/],
   ['--parse-copilot', 'copilot-user', /^copilot-premium=20% resets@1788220800\n$/],
   ['--parse-antigravity', 'antigravity-userstatus', /^antigravity-gemini=69% resets@\d+ antigravity-claude-gpt=55% resets@\d+\n$/],
