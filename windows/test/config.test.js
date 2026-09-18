@@ -46,6 +46,17 @@ test('failed config save reports error without throwing', (t) => {
   assert.equal(fs.readFileSync(path.join(home, '.quotabar'), 'utf8'), 'blocked');
 });
 
+test('failed config replacement preserves previous file and removes temporary output', (t) => {
+  isolatedHome(t);
+  const original = { ...defaultConfig(), zaiToken: 'REDACTED-original' };
+  assert.equal(saveConfig(original), true);
+  t.mock.method(fs, 'renameSync', () => { throw new Error('Simulated file lock'); });
+  t.mock.method(console, 'error', () => {});
+  assert.equal(saveConfig({ ...original, zaiToken: 'REDACTED-new' }), false);
+  assert.deepEqual(loadConfig(), original);
+  assert.deepEqual(fs.readdirSync(path.dirname(configFileURL())), ['config.json']);
+});
+
 test('environment token overrides config only when nonempty', () => {
   const config = { zaiToken: 'REDACTED-stored' };
   assert.equal(resolvedToken(config, { QUOTABAR_ZAI_TOKEN: 'REDACTED-env' }), 'REDACTED-env');

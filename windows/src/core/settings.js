@@ -17,8 +17,8 @@ export const TOGGLEABLE_SOURCES = [
   { id: 'antigravity', title: 'Antigravity' },
 ];
 
-/// Keys pasted directly in the Settings window (the OAuth-managed sources
-/// keep reading their CLI auth files; custom sources stay JSON-first).
+/// Common keys shown at the top of Settings; OAuth credentials and custom
+/// sources are also editable in the advanced section.
 export const KEY_FIELDS = [
   { id: 'zai', title: 'Z.AI',
     tooltip: 'Discover Sources scans browser localStorage for the z.ai token '

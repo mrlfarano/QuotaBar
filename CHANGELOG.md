@@ -8,6 +8,10 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ### Windows verification and regression fixes
 
+- Discover Sources now refreshes the tray without opening a results alert.
+- Expanded Windows Settings with tray-source selection, Z.AI endpoint options,
+  provider credentials, and custom-source editing. Advanced edits validate
+  before saving, retain masked credentials, and report errors inline.
 - Added core, provider/auth, persistence, discovery, CLI, PNG/ICO, real Electron
   UI/IPC, and packaged-executable test suites. CI compares all ten Windows
   fixture outputs against a macOS Swift artifact and runs on `main`.

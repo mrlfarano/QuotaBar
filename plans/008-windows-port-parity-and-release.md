@@ -8,6 +8,11 @@ packaged CLI checks pass locally. Node.js 22.12+ is required by Electron 44.
 CI now targets `main`, captures Swift fixture output on macOS, and compares all
 ten Windows outputs byte-for-byte. Release jobs run tests before uploading.
 
+Windows discovery refreshes silently. Settings includes advanced provider
+credentials, tray selection, endpoint options, and custom-source editing with
+inline validation. Blank secrets preserve refreshed credentials; config saves
+replace the file atomically so failed writes retain the previous configuration.
+
 Live checks: Z.AI, GitHub, and Codex returned quotas. Claude authenticated but
 returned null quota buckets. Copilot/OpenRouter credentials and a running
 Antigravity instance were unavailable. Auth-refresh paths are covered with

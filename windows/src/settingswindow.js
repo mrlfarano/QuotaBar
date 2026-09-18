@@ -4,8 +4,8 @@
 // through the same config store and pushed via onApply, which rebuilds the
 // tray menu and refreshes sources). Key fields show stars + the last 5
 // characters; focusing clears the field for a fresh paste, leaving it empty
-// keeps the old value. Custom sources and the OAuth-managed tokens stay
-// JSON-first via "Open config.json…".
+// keeps the old value. Advanced options and custom sources use an explicit
+// Save button so incomplete edits never replace the working configuration.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,8 @@ import {
 } from './core/settings.js';
 import { normalizedPollMinutes } from './core/format.js';
 import { saveConfig, configFileURL } from './core/config.js';
+import { advancedSettingsState, applyAdvancedSettings } from './core/advancedsettings.js';
+import { setupAdvancedSettings } from './settingsadvanced.js';
 
 let shared = null; // shared instance so reopening re-syncs to the live config
 
@@ -34,9 +36,11 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
   }
 
   shared = new BrowserWindow({
-    width: 380,
-    height: 480,
-    resizable: false,
+    width: 620,
+    height: 740,
+    minWidth: 420,
+    minHeight: 400,
+    resizable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -57,6 +61,7 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
   };
   shared.on('closed', () => {
     for (const [channel, listener] of handlers) ipcMain.removeListener(channel, listener);
+    ipcMain.removeHandler('settings:save-advanced');
     shared = null;
   });
 
@@ -103,6 +108,16 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
     pushState();
   });
   on('settings:open-config', () => { shell.openPath(configFileURL()); });
+  ipcMain.handle('settings:save-advanced', (event, edit) => {
+    if (event.sender !== window.webContents) return { error: 'Settings window required.' };
+    try {
+      const updated = applyAdvancedSettings(getConfig(), edit);
+      if (!saveConfig(updated)) return { error: 'Could not save config.json. Check folder permissions and try again.' };
+      onApply(updated);
+      pushState();
+      return { state: advancedSettingsState(updated) };
+    } catch (error) { return { error: error.message }; }
+  });
 
   shared.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(settingsHTML()));
   return shared;
@@ -110,6 +125,7 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
 
 function settingsState(config, sections) {
   return {
+    advanced: advancedSettingsState(config),
     pollMinutes: normalizedPollMinutes(config.pollMinutes),
     pollChoices: POLL_CHOICES,
     loginEnabled: app.getLoginItemSettings().openAtLogin,
@@ -143,9 +159,27 @@ function settingsHTML() {
   .status { font-size: 11px; opacity: .75; justify-self: start; }
   select { padding: 2px 4px; }
   button { margin-top: 14px; padding: 4px 12px; }
+  input, select, button { font: inherit; }
+  input { min-width: 0; }
+  :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  details { margin-top: 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  fieldset { min-width: 0; border: 1px solid GrayText; border-radius: 6px; margin: 12px 0; padding: 12px; }
+  #advancedEditor { border: 0; padding: 0; }
+  .advanced-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 12px; margin-top: 12px; align-items: center; }
+  .advanced-grid input:not([type=checkbox]) { width: 100%; box-sizing: border-box; padding: 5px 6px; }
+  .clear-option { grid-column: 2; font-size: 12px; }
+  .hint { font-size: 12px; opacity: .8; }
+  #advancedStatus { min-height: 1.5em; }
+  .actions { display: flex; gap: 8px; }
+  @media (max-width: 450px) { .advanced-grid { grid-template-columns: 1fr; } .clear-option { grid-column: 1; } }
 </style>
 </head>
 <body>
+  <h1>Settings</h1>
+  <p class="hint">General settings, sources and keys apply immediately.</p>
   <div class="row">
     <label for="poll">Poll menu data every</label>
     <select id="poll"></select>
@@ -158,11 +192,17 @@ function settingsHTML() {
   <div class="grid" id="sources"></div>
   <h2>Keys</h2>
   <div id="keys"></div>
+  <details id="advanced">
+    <summary>Advanced configuration</summary>
+    <fieldset id="advancedEditor" aria-label="Advanced configuration"></fieldset>
+    <div class="actions"><button id="saveAdvanced">Save advanced changes</button><button id="reloadAdvanced">Discard changes</button></div>
+    <p id="advancedStatus" role="status" aria-live="polite"></p>
+  </details>
   <button id="openConfig">Open config.json…</button>
   <script>
     const escapeHTML = (s) => String(s).replace(/[&<>"']/g,
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    window.quotabar.settingsInitRequest();
+    (${setupAdvancedSettings.toString()})(window.quotabar, escapeHTML);
     window.quotabar.onInit((state) => {
       const focusedSource = document.activeElement.matches('#sources input')
         ? document.activeElement.dataset.id : null;
@@ -211,6 +251,7 @@ function settingsHTML() {
       }
     });
     document.getElementById('openConfig').onclick = () => window.quotabar.openConfig();
+    window.quotabar.settingsInitRequest();
   </script>
 </body>
 </html>`;

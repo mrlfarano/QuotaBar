@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('quotabar', {
   clearKey: (id) => ipcRenderer.send('settings:clear-key', id),
   setLogin: (enabled) => ipcRenderer.send('settings:set-login', enabled),
   openConfig: () => ipcRenderer.send('settings:open-config'),
+  saveAdvanced: (settings) => ipcRenderer.invoke('settings:save-advanced', settings),
 });

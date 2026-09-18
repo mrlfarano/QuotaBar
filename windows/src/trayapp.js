@@ -7,7 +7,7 @@
 // macOS) carries the state, and the escalating numbers ("41% · 43m", warning
 // glyph) live in the tray tooltip, which Windows updates live.
 
-import { app, Tray, Menu, nativeImage, clipboard, dialog, shell } from 'electron';
+import { app, Tray, Menu, nativeImage, clipboard } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -393,12 +393,7 @@ export class QuotaBarApp {
       saveConfig(this.config);
       this.rebuild('discovered');
     }
-    await dialog.showMessageBox({
-      type: 'info',
-      title: 'Source discovery',
-      message: 'Source discovery',
-      detail: outcome.lines.join('\n'),
-    });
+    await this.refreshNow();
   }
 
   openSettings() {

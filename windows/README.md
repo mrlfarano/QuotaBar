@@ -32,12 +32,30 @@ icon-branded `QuotaBar.exe` by CI.
 | Menu-bar item shows glyph **+ text** (`41% · ↻43m ⚠︎`) | Tray icons are icon-only on Windows — the glyph's colors + red dot carry the band, and the escalation numbers (`↻` countdowns, `%`, ⚠︎), ring legend, and per-gauge "% left" live in the live-updating tooltip |
 | Attributed menu text (colored bars/percents inline) | Native menus can't color text; each gauge row carries a band-colored ring icon next to the mono block bar |
 | Inline settings in the dropdown + a small key editor | A native Settings window (tray menus can't host text editing either): poll cadence, per-source checkboxes with live status lines, all four paste-able keys (incl. Copilot) with ×-to-delete, **Start at login** |
-| `NSAlert` prompts | Native dialogs / small windows with the same copy |
+| `NSAlert` discovery results | Discovery refreshes silently; configuration lives in Settings |
 | z.ai token scan: `~/Library/Application Support` browser roots | Same byte-level scan across `%LOCALAPPDATA%` Chromium roots (Chrome, Canary, Chromium, Brave, Edge, Arc, Comet) + Firefox's `%APPDATA%` webappsstore.sqlite; Edge-protected stores are never read |
 | Antigravity process scan via `ps`/`lsof` | Same scan via `Get-CimInstance` / `Get-NetTCPConnection` (netstat fallback) |
 | LaunchAgent via `scripts/install-login.sh` | **Start at login** checkbox in Settings (registry-backed via `app.setLoginItemSettings`) |
 | config saved 0600 | `chmod 600` is a no-op on NTFS; the file sits in your profile folder — set ACLs yourself if you share the machine |
 | VoiceOver labels on gauge rows | Electron exposes no per-menu-item accessibility label API — an honest gap, no hack shipped |
+
+## Configure the app
+
+Open **Settings…** from the tray menu. Poll cadence, Start at login, source
+toggles, and common keys apply immediately. **Discover Sources** scans credentials
+and refreshes the tray without opening a results alert.
+
+Expand **Advanced configuration** for tray-source selection, the Z.AI base URL
+and authorization prefix, provider access/refresh tokens and account IDs, and
+custom sources. Custom sources support a URL, bearer token, request headers,
+used/limit paths, and an optional reset field. Use **Save advanced changes** to
+validate and apply these edits; **Discard changes** restores saved values.
+
+Blank secret fields retain stored credentials, including tokens refreshed while
+Settings was open. **Clear** explicitly removes a credential. Custom headers stay
+hidden: enter a JSON object to replace them, or `{}` to clear them. Invalid input
+and save failures appear inline and retain the draft. CLI credential files are
+never edited. **Open config.json…** remains available for direct file access.
 
 ## Run from source
 

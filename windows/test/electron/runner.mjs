@@ -4,10 +4,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron';
+import { fileURLToPath } from 'node:url';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { QuotaBarApp } from '../../src/trayapp.js';
 import { openSettingsWindow } from '../../src/settingswindow.js';
-import { defaultConfig, saveConfig, loadConfig, cacheFileURL } from '../../src/core/config.js';
+import { defaultConfig, saveConfig, loadConfig, cacheFileURL, configFileURL } from '../../src/core/config.js';
 
 const home = process.env.QUOTABAR_TEST_HOME;
 assert.ok(home && path.basename(home).startsWith('quotabar-electron-test-'));
@@ -79,6 +80,40 @@ async function main() {
       assert.ok(item);
       item.click();
       assert.equal(loadConfig().mainSource, 'github');
+    });
+
+    await check('discovery saves new sources and refreshes without opening an alert or window', async () => {
+      const discoverer = new QuotaBarApp({ demoMode: false });
+      const authFile = path.join(home, '.codex', 'auth.json');
+      fs.mkdirSync(path.dirname(authFile), { recursive: true });
+      fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: 'REDACTED-discovery' } }));
+      const originalDialog = dialog.showMessageBox;
+      const windows = BrowserWindow.getAllWindows();
+      let alerts = 0;
+      let refreshes = 0;
+      const rebuilds = [];
+      dialog.showMessageBox = async () => { alerts++; return { response: 0 }; };
+      discoverer.rebuild = (reason) => rebuilds.push(reason);
+      discoverer.refreshNow = async () => {
+        assert.equal(discoverer.config.sources.codex.enabled, true);
+        refreshes++;
+      };
+      try {
+        await discoverer.discoverSources();
+        assert.equal(loadConfig().sources.codex.discovered, true);
+        assert.deepEqual(rebuilds, ['discovered']);
+        assert.equal(refreshes, 1);
+        await discoverer.discoverSources();
+        assert.deepEqual(rebuilds, ['discovered'], 'Unchanged discovery should not rewrite config');
+        assert.equal(refreshes, 2, 'Existing sources also refresh after discovery');
+        assert.equal(alerts, 0);
+        assert.deepEqual(BrowserWindow.getAllWindows(), windows);
+      } finally {
+        dialog.showMessageBox = originalDialog;
+        fs.unlinkSync(authFile);
+        saveConfig(controller.config);
+        app.quotabarInstance = controller;
+      }
     });
 
     let applies = 0;
@@ -159,6 +194,90 @@ async function main() {
       const before = controller.config.pollMinutes;
       ipcMain.emit('settings:set-poll', { sender: {} }, 60);
       assert.equal(controller.config.pollMinutes, before);
+    });
+
+    await check('advanced settings validate inline and save custom sources through the form', async () => {
+      await js(`document.getElementById('advanced').open = true;
+        document.getElementById('addCustom').click();
+        document.querySelector('.custom-source [data-field=id]').value = 'test-custom';
+        document.getElementById('saveAdvanced').click();`);
+      await until(() => js("document.getElementById('advancedStatus').textContent.includes('required')"));
+      assert.equal(controller.config.sources?.custom, undefined);
+      await js(`{
+        const source = document.querySelector('.custom-source');
+        for (const [key, value] of Object.entries({url:'https://example.com/usage',title:'<img src=x onerror=alert(1)>',usedPath:'data.used',limitPath:'data.limit',token:'REDACTED-custom-form',headers:'{"X-Key":"REDACTED-header"}'})) source.querySelector('[data-field=' + key + ']').value = value;
+        document.querySelector('#advancedGeneral [data-field=mainSource]').value = 'test-custom';
+        document.getElementById('saveAdvanced').click();
+      }`);
+      await until(() => controller.config.sources?.custom?.length === 1);
+      assert.equal(loadConfig().mainSource, 'test-custom');
+      assert.equal(loadConfig().sources.custom[0].token, 'REDACTED-custom-form');
+      assert.deepEqual(loadConfig().sources.custom[0].headers, { 'X-Key': 'REDACTED-header' });
+      assert.equal(await js("document.body.innerHTML.includes('REDACTED-custom-form')"), false);
+      assert.equal(await js("document.body.innerHTML.includes('REDACTED-header')"), false);
+      assert.equal(await js("document.querySelectorAll('#customSources img').length"), 0);
+    });
+
+    await check('advanced drafts survive live updates and discard restores saved values', async () => {
+      await js(`{
+        const field = document.querySelector('#advancedGeneral [data-field=baseURL]');
+        field.value = 'https://draft.example.com'; field.dispatchEvent(new Event('input', {bubbles:true}));
+        window.quotabar.setPoll(15);
+      }`);
+      await until(() => controller.config.pollMinutes === 15);
+      assert.equal(await js("document.querySelector('#advancedGeneral [data-field=baseURL]').value"), 'https://draft.example.com');
+      await js("document.getElementById('reloadAdvanced').click()");
+      assert.equal(await js("document.querySelector('#advancedGeneral [data-field=baseURL]').value"), controller.config.baseURL);
+      await js("document.querySelector('.remove-custom').click(); document.querySelector('#advancedGeneral [data-field=mainSource]').value = ''; document.getElementById('saveAdvanced').click()");
+      await until(() => controller.config.sources?.custom?.length === 0);
+      assert.equal(loadConfig().mainSource, undefined);
+    });
+
+    await check('advanced credential fields retain refreshed tokens and support explicit clearing', async () => {
+      controller.config.sources.codex = { enabled: false, discovered: true, token: 'REDACTED-old-access', refreshToken: 'REDACTED-old-refresh' };
+      await js('window.quotabar.settingsInitRequest()');
+      await until(() => js("document.querySelector('.advanced-provider[data-id=codex] [data-field=token]').placeholder.includes('ccess')"));
+      controller.config.sources.codex.token = 'REDACTED-refreshed-access';
+      controller.config.sources.codex.refreshToken = 'REDACTED-refreshed-refresh';
+      await js("document.getElementById('saveAdvanced').click()");
+      await until(() => js("!document.getElementById('saveAdvanced').disabled"));
+      assert.equal(loadConfig().sources.codex.token, 'REDACTED-refreshed-access');
+      assert.equal(loadConfig().sources.codex.refreshToken, 'REDACTED-refreshed-refresh');
+      await js("document.querySelector('.advanced-provider[data-id=codex] [data-field=cleartoken]').click(); document.getElementById('saveAdvanced').click()");
+      await until(() => controller.config.sources.codex.token === '');
+      assert.equal(loadConfig().sources.codex.enabled, false);
+      assert.equal(loadConfig().sources.codex.refreshToken, 'REDACTED-refreshed-refresh');
+    });
+
+    await check('failed advanced save keeps live config and editable draft', async () => {
+      const file = configFileURL();
+      const saved = fs.readFileSync(file);
+      const original = controller.config;
+      fs.unlinkSync(file);
+      fs.mkdirSync(file);
+      try {
+        await js(`{
+          const field = document.querySelector('#advancedGeneral [data-field=baseURL]');
+          field.value = 'https://unsaved.example.com'; field.dispatchEvent(new Event('input', {bubbles:true}));
+          document.getElementById('saveAdvanced').click();
+        }`);
+        await until(() => js("document.getElementById('advancedStatus').textContent.includes('Could not save')"));
+        assert.equal(controller.config, original);
+        assert.equal(await js("document.querySelector('#advancedGeneral [data-field=baseURL]').value"), 'https://unsaved.example.com');
+      } finally {
+        fs.rmdirSync(file);
+        fs.writeFileSync(file, saved);
+        await js("document.getElementById('reloadAdvanced').click()");
+      }
+    });
+
+    await check('advanced save rejects a different renderer', async () => {
+      const other = new BrowserWindow({ show: false, webPreferences: { preload: fileURLToPath(new URL('../../src/preload.cjs', import.meta.url)) } });
+      try {
+        await other.loadURL('about:blank');
+        const result = await other.webContents.executeJavaScript('window.quotabar.saveAdvanced({})');
+        assert.equal(result.error, 'Settings window required.');
+      } finally { other.destroy(); }
     });
 
     await check('live controller caches snapshots and respects disabled sources', async () => {
