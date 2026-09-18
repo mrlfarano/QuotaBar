@@ -47,7 +47,7 @@ export function loadPreferences() {
 export function paused(preferences, now = Date.now()) { return preferences.pauseUntil === -1 || preferences.pauseUntil > now; }
 
 export function cleanGauges(gauges) {
-  return (Array.isArray(gauges) ? gauges : []).filter(g => typeof g.id === 'string' && typeof g.label === 'string' && Number.isFinite(g.pct)).slice(0, 100).map(g => ({
+  return (Array.isArray(gauges) ? gauges : []).filter(g => g && typeof g.id === 'string' && typeof g.label === 'string' && Number.isFinite(g.pct)).slice(0, 100).map(g => ({
     id: g.id.slice(0, 128), label: g.label.slice(0, 100), pct: Math.min(100, Math.max(0, g.pct)),
     resetAt: g.resetAt && Number.isFinite(new Date(g.resetAt).getTime()) ? new Date(g.resetAt).toISOString() : null,
   }));

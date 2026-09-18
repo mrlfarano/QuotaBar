@@ -21,6 +21,7 @@ test('failed fetch preserves last good data and age, without exposing response o
   const cached = cachedReadings({ version: 1, providers: [bad] });
   assert.equal(cached[0].status, 'Cached');
   assert.equal(cached[0].lastSuccess, 100);
+  assert.deepEqual(cachedReadings({ version: 1, providers: [null, { ...bad, gauges: [null, {}, 'broken'] }] })[0].gauges, []);
   assert.equal(applyReading(bad, { id: 'codex', gauges: [] }, 300).status, 'No quota reported');
 });
 
