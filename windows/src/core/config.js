@@ -93,7 +93,9 @@ function validateSources(json) {
     if (custom.some((c) => c === null)) return null;
     out.custom = custom;
   }
-  for (const key of ['claude', 'codex', 'openrouter', 'copilot', 'antigravity']) {
+  // `zai` shares the OAuth source shape (its token lives at the top level,
+  // `zaiToken`) — the macOS toggle writes the full object.
+  for (const key of ['zai', 'claude', 'codex', 'openrouter', 'copilot', 'antigravity']) {
     if (o[key] !== undefined) {
       const source = validateOAuthSource(o[key]);
       if (!source) return null;
@@ -137,12 +139,17 @@ export function loadConfig() {
 
 export function saveConfig(config) {
   const file = configFileURL();
+  const temporary = `${file}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, sortedPretty(config), 'utf8');
-    fs.chmodSync(file, 0o600); // best-effort on Windows; full owner-only ACLs are POSIX-only
+    fs.writeFileSync(temporary, sortedPretty(config), { encoding: 'utf8', mode: 0o600 });
+    fs.chmodSync(temporary, 0o600); // best-effort on Windows; full owner-only ACLs are POSIX-only
+    fs.renameSync(temporary, file);
+    return true;
   } catch (error) {
+    try { fs.unlinkSync(temporary); } catch { /* Nothing to clean up. */ }
     console.error(`quotabar: failed saving config: ${error.message}`);
+    return false;
   }
 }
 

@@ -38,12 +38,18 @@ sections in the README.
 
 ## Pull requests
 
-1. Fork + branch from `master`.
+1. Fork + branch from `main`.
 2. Keep the change small; one source/feature per PR.
 3. Verify: `swift build -c release` clean, `swift test` green, offline
    `--parse-*` checks pass, and (if touching a live source) the matching
    `--probe <source>` works.
 4. Describe what you tested and paste the probe output.
+
+For Windows changes, use Node.js 22.12+ and run `npm ci` then
+`npm run test:windows` from `windows/`. This covers core tests, real Electron
+settings/tray integration, packaging, and the packaged CLI. CI also compares
+all ten Windows parser outputs with the Swift build byte-for-byte. See
+`windows/README.md` for isolated output directories and opt-in live checks.
 
 ## Reporting bugs
 

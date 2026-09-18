@@ -37,15 +37,16 @@ export function localRequest(url, { method = 'GET', headers = {}, body, timeoutM
       return;
     }
     const transport = parsed.protocol === 'https:' ? nodeHttps : nodeHttp;
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
     const req = transport.request(
       {
-        hostname: parsed.hostname,
+        hostname,
         port: parsed.port,
         path: parsed.pathname + parsed.search,
         method,
         headers,
         // Server-trust bypass, localhost only — checked before use.
-        rejectUnauthorized: parsed.protocol === 'https:' && isLocalhost(parsed.hostname),
+        rejectUnauthorized: !isLocalhost(hostname),
       },
       (res) => {
         const chunks = [];

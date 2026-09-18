@@ -13,6 +13,7 @@
 import { readJSONCandidates, fileExists } from './credfiles.js';
 import { defaultConfig } from './config.js';
 import { hasStoredCredential } from './sources/copilot.js';
+import * as ZaiToken from './zaitoken.js';
 
 const CLAUDE_FILE = ['~/.claude/.credentials.json'];
 const CODEX_FILE = ['~/.codex/auth.json'];
@@ -22,9 +23,35 @@ const ANTIGRAVITY_DIRS = [
   '%LOCALAPPDATA%/Antigravity',
 ];
 
-export function runDiscovery(inputConfig, env = process.env) {
+export function runDiscovery(inputConfig, env = process.env, deps = {}) {
+  // Scanners are injectable so tests can pin the zai branch deterministically.
+  const findZaiToken = deps.findZaiToken ?? (() => ZaiToken.findToken());
+  const bridgeToken = deps.bridgeToken ?? (() => ZaiToken.claudeBridgeToken());
   const config = { ...defaultConfig(), ...inputConfig, sources: { ...inputConfig?.sources } };
   const outcome = { changed: false, lines: [] };
+
+  // Z.AI — first-class: the dashboard token lives in browser localStorage
+  // (see zaitoken.js). Only fills an empty slot; a user-set token is never
+  // overwritten (the on/off toggle gates fetching, not discovery).
+  if ((config.zaiToken ?? '') !== '') {
+    outcome.lines.push('zai: token already set');
+  } else {
+    const found = findZaiToken();
+    if (found) {
+      config.zaiToken = found.token;
+      outcome.lines.push(`zai: token discovered in ${found.browser} localStorage`);
+      outcome.changed = true;
+    } else {
+      const bridged = bridgeToken();
+      if (bridged) {
+        config.zaiToken = bridged;
+        outcome.lines.push("zai: token picked up from Claude Code's z.ai base URL");
+        outcome.changed = true;
+      } else {
+        outcome.lines.push('zai: no token found (Chrome/Chromium-family + Firefox scanned; Safari is TCC-protected and skipped) — paste it in Settings');
+      }
+    }
+  }
 
   // Claude — Claude Code credential file (keychain is out of scope).
   if (claudeReadable(CLAUDE_FILE)) {
@@ -53,7 +80,7 @@ export function runDiscovery(inputConfig, env = process.env) {
   // GitHub — token from environment for the existing rate-limit source.
   const envToken = [env.GH_TOKEN, env.GITHUB_TOKEN].find((t) => t !== undefined && t !== '');
   if (envToken !== undefined) {
-    if (config.sources.github && (config.sources.github.token ?? '') !== '') {
+    if (config.sources.github?.enabled === false || (config.sources.github?.token ?? '') !== '') {
       outcome.lines.push('github: already configured');
     } else {
       config.sources.github = { enabled: true, token: envToken, discovered: true };
@@ -79,7 +106,7 @@ export function runDiscovery(inputConfig, env = process.env) {
   // OpenRouter — key from environment.
   const openrouterKey = env.OPENROUTER_API_KEY;
   if (openrouterKey !== undefined && openrouterKey !== '') {
-    if (config.sources.openrouter && (config.sources.openrouter.token ?? '') !== '') {
+    if (config.sources.openrouter?.enabled === false || (config.sources.openrouter?.token ?? '') !== '') {
       outcome.lines.push('openrouter: already configured');
     } else {
       config.sources.openrouter = { enabled: true, token: openrouterKey, discovered: true };

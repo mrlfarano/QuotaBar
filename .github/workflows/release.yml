@@ -32,3 +32,49 @@ jobs:
             --generate-notes \
             || gh release upload "$GITHUB_REF_NAME" \
                  "build/QuotaBar-${GITHUB_REF_NAME}.zip" --clobber
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Windows unit and Electron integration tests
+        run: npm run test:all
+
+      # VERSION (vX.Y.Z) overrides package.json so the exe metadata matches
+      # the tag, mirroring the macOS make-app.sh behavior.
+      - name: Package Windows build
+        run: npm run package:win
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Packaged executable smoke tests
+        run: npm run test:package
+
+      - name: Zip bundle
+        shell: pwsh
+        run: Compress-Archive -Path "out/QuotaBar-win32-x64/*" -DestinationPath "../QuotaBar-${env:GITHUB_REF_NAME}-win32-x64.zip"
+
+      - name: Upload to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$env:GITHUB_REF_NAME" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:GITHUB_REF_NAME" --title "QuotaBar $env:GITHUB_REF_NAME" --generate-notes
+          }
+          gh release upload "$env:GITHUB_REF_NAME" "../QuotaBar-${env:GITHUB_REF_NAME}-win32-x64.zip" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

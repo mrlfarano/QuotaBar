@@ -15,10 +15,15 @@ later version — rings match the app's metaphor; cost APIs show $ spend.
 - `GET https://chatgpt.com/backend-api/wham/usage`
 - Headers: `Authorization: Bearer <access_token>`, `ChatGPT-Account-Id: <account_id>`
 - Credential: `~/.codex/auth.json` → `tokens.access_token`, `tokens.account_id`
-- Response: `plan_type`, `rate_limit.primary_window` (5h, 18000s) /
-  `secondary_window` (weekly, 604800s) with `used_percent`, `reset_at`
+- Response: `plan_type`, `rate_limit.primary_window` / `secondary_window`
+  with `limit_window_seconds` (5h = 18000, weekly = 604800), `used_percent`, `reset_at`
   (epoch s), `reset_after_seconds`. Fixture: `testdata/codex-usage.json`
   (live payload, identity fields redacted).
+- Pro reverified 2026-09-18: a weekly-only quota can occupy `primary_window`
+  with `secondary_window: null`. Classify by duration, not position; retain
+  positional labels only as a legacy fallback. Sanitized regression fixture:
+  `testdata/codex-pro-weekly.json`. A lone weekly window uses the outer ring,
+  and the tooltip legend names the actual displayed windows.
 
 ### Claude — endpoint confirmed; local token expired
 

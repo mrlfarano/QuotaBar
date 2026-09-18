@@ -389,7 +389,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                      weekRemaining: secondary?.remainingPct,
                                      weekBand: secondary?.band)
         button.attributedTitle = escalationTitle(for: primary, demo: demo)
-        var tip = "QuotaBar — outer ring = 5-hour window · inner ring = weekly limit"
+        var tip = "QuotaBar — outer ring = \(primary.label.lowercased())"
+        if let secondary { tip += " · inner ring = \(secondary.label.lowercased())" }
         for gauge in gauges {
             tip += "\n\(gauge.label): \(Int(gauge.pct.rounded()))% used · \(Int(gauge.remainingPct.rounded()))% left"
             if let used = gauge.used, let total = gauge.total {

@@ -1,15 +1,24 @@
 {
   "name": "quotabar-windows",
   "productName": "QuotaBar",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Every AI quota you're burning through, in one tray glyph (Windows port of QuotaBar)",
   "main": "src/main.js",
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "electron .",
     "demo": "electron . --demo",
     "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/*.test.js\"",
+    "test:electron": "node --test \"test/electron/*.test.js\"",
+    "test:all": "node --test \"test/*.test.js\" \"test/electron/*.test.js\"",
+    "test:package": "node --test \"test/package/*.test.js\"",
+    "test:windows": "npm run test:all && npm run package:win && npm run test:package",
+    "test:live": "node scripts/live-check.js",
     "parse": "node src/cli.js",
     "package:win": "node scripts/package-win.js"
   },

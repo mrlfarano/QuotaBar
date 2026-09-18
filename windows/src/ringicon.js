@@ -32,6 +32,11 @@ function hexToRGBA(hex) {
 /// Port of dualRingImage(fiveRemaining:fiveBand:weekRemaining:weekBand:).
 /// Returns a PNG Buffer at the requested pixel size (16 → 1× tray, 32 → 2×).
 export function dualRingPNG({ size = 16, fiveRemaining, fiveBand, weekRemaining, weekBand }) {
+  return encodePNG(size, size, dualRingRGBA({ size, fiveRemaining, fiveBand, weekRemaining, weekBand }));
+}
+
+/// The raster behind dualRingPNG, exposed so tests can assert pixels.
+export function dualRingRGBA({ size = 16, fiveRemaining, fiveBand, weekRemaining, weekBand }) {
   const scale = size / CANVAS;
   const center = size / 2;
 
@@ -45,8 +50,12 @@ export function dualRingPNG({ size = 16, fiveRemaining, fiveBand, weekRemaining,
   if (fiveRemaining != null && weekRemaining != null && weekBand != null) {
     rings.push({ radius: INNER_RADIUS * scale, width: INNER_WIDTH * scale, fraction: weekRemaining / 100, color: hexToRGBA(BandColor[weekBand]) });
   }
+  // Shape channel for the critical band: a filled center dot (radius 2 on
+  // the 20-canvas, systemRed) when the outer ring is red, so the state
+  // survives color-vision deficiencies.
+  const dotRadius = (fiveBand ?? weekBand) === 'red' ? 2 * scale : 0;
 
-  return encodePNG(size, size, rasterize(size, center, rings));
+  return rasterize(size, center, rings, dotRadius);
 }
 
 /// Single-ring variant for per-row menu icons: the gauge's own proportion in
@@ -55,10 +64,10 @@ export function gaugeRingPNG({ pct, band, size = 16 }) {
   const scale = size / CANVAS;
   return encodePNG(size, size, rasterize(size, size / 2, [
     { radius: OUTER_RADIUS * scale, width: OUTER_WIDTH * scale, fraction: pct / 100, color: hexToRGBA(BandColor[band]) },
-  ]));
+  ], 0));
 }
 
-function rasterize(size, center, rings) {
+function rasterize(size, center, rings, dotRadius) {
   const rgba = new Uint8Array(size * size * 4);
   const step = 1 / SAMPLES;
   for (let py = 0; py < size; py++) {
@@ -71,7 +80,7 @@ function rasterize(size, center, rings) {
         for (let sx = 0; sx < SAMPLES; sx++) {
           const x = px + (sx + 0.5) * step;
           const y = py + (sy + 0.5) * step;
-          const color = samplePixel(x, y, center, rings);
+          const color = samplePixel(x, y, center, rings, dotRadius);
           // Straight-alpha compositing of track + arc over transparent.
           r += color[0] * color[3];
           g += color[1] * color[3];
@@ -90,8 +99,13 @@ function rasterize(size, center, rings) {
   return rgba;
 }
 
-/// Top-most color at one supersample: track ring first, band arc on top.
-function samplePixel(x, y, center, rings) {
+/// Top-most color at one supersample: red dot, then band arc, then track.
+function samplePixel(x, y, center, rings, dotRadius) {
+  if (dotRadius > 0) {
+    const dx = x - center;
+    const dy = y - center;
+    if (dx * dx + dy * dy <= dotRadius * dotRadius) return hexToRGBA(BandColor.red);
+  }
   for (const ring of rings) {
     const dx = x - center;
     const dy = y - center;
