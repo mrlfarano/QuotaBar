@@ -1,5 +1,6 @@
 // Real Electron/Chromium, native tray/menu, and preload IPC. No real credentials,
-// external requests, clipboard writes, login-item writes, or visible windows.
+// external requests, clipboard writes, or visible windows. The native login
+// check creates one uniquely named temporary startup entry and removes it.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { QuotaBarApp } from '../../src/trayapp.js';
 import { openSettingsWindow } from '../../src/settingswindow.js';
+import { loginItemOptions, isLoginEnabled, setLoginEnabled } from '../../src/loginitem.js';
 import { defaultConfig, saveConfig, loadConfig, cacheFileURL, configFileURL } from '../../src/core/config.js';
 
 const home = process.env.QUOTABAR_TEST_HOME;
@@ -18,9 +20,13 @@ app.disableHardwareAcceleration();
 app.on('window-all-closed', () => {});
 BrowserWindow.prototype.show = () => {};
 BrowserWindow.prototype.focus = () => {};
+const nativeLogin = {
+  getLoginItemSettings: app.getLoginItemSettings.bind(app),
+  setLoginItemSettings: app.setLoginItemSettings.bind(app),
+};
 let login = false;
 const loginWrites = [];
-app.getLoginItemSettings = () => ({ openAtLogin: login });
+app.getLoginItemSettings = () => ({ openAtLogin: false, launchItems: login ? [{ ...loginItemOptions(app), scope: 'user', enabled: true }] : [] });
 app.setLoginItemSettings = (value) => { login = value.openAtLogin; loginWrites.push(value); };
 const opened = [];
 shell.openPath = async (file) => { opened.push(file); return ''; };
@@ -144,7 +150,7 @@ async function main() {
     });
 
     await check('source checkbox disables fetching while preserving stored key', async () => {
-      await js("{ const box = document.querySelector('#sources input[data-id=zai]'); box.focus(); box.click(); }");
+      await js("document.getElementById('tab-sources').click(); { const box = document.querySelector('#sources input[data-id=zai]'); box.focus(); box.click(); }");
       await until(() => controller.config.sources?.zai?.enabled === false);
       assert.equal(loadConfig().zaiToken, 'REDACTED-original-key');
       await until(() => js("document.activeElement.matches('#sources input[data-id=zai]')"));
@@ -152,10 +158,50 @@ async function main() {
 
     await check('Start at login invokes login IPC without changing provider config', async () => {
       const before = JSON.stringify(controller.config);
-      await js("document.getElementById('login').click()");
+      await js("document.getElementById('tab-general').click(); document.getElementById('login').click()");
       await until(() => loginWrites.length > 0);
       assert.equal(login, true);
+      await until(() => js("document.getElementById('login').checked"));
+      await js('window.quotabar.settingsInitRequest()');
+      assert.equal(await js("document.getElementById('login').checked"), true);
+      await js("document.getElementById('login').click()");
+      await until(() => !login);
+      assert.equal(await js("document.getElementById('login').checked"), false);
       assert.equal(JSON.stringify(controller.config), before);
+    });
+
+    await check('real Windows login entry enables, reads back, disables, and cleans up', () => {
+      const options = { ...loginItemOptions(app), name: `QuotaBarVerification-${process.pid}` };
+      try {
+        assert.equal(isLoginEnabled(nativeLogin, options), false);
+        setLoginEnabled(nativeLogin, true, options);
+        assert.equal(isLoginEnabled(nativeLogin, options), true);
+        setLoginEnabled(nativeLogin, false, options);
+        assert.equal(isLoginEnabled(nativeLogin, options), false);
+      } finally {
+        nativeLogin.setLoginItemSettings({ ...options, openAtLogin: false });
+      }
+    });
+
+    await check('provider toggles keep row positions and visible text unchanged', async () => {
+      await js("document.getElementById('tab-sources').click()");
+      const layout = () => js("[...document.querySelectorAll('#sources label')].map(row => ({text:row.innerText,top:row.getBoundingClientRect().top,height:row.getBoundingClientRect().height}))");
+      const before = await layout();
+      await js("document.querySelector('#sources input[data-id=claude]').click()");
+      await until(() => controller.config.sources?.claude?.enabled);
+      assert.deepEqual(await layout(), before);
+      await js("document.querySelector('#sources input[data-id=claude]').click()");
+      await until(() => !controller.config.sources?.claude?.enabled);
+      assert.deepEqual(await layout(), before);
+    });
+
+    await check('settings tabs support arrow keys and keep advanced draft when switching', async () => {
+      await js("document.getElementById('tab-general').focus(); document.getElementById('tab-general').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight',bubbles:true}))");
+      assert.equal(await js("document.activeElement.id"), 'tab-sources');
+      assert.equal(await js("document.getElementById('sourceSettings').hidden"), false);
+      await js("document.getElementById('tab-advanced').click(); { const field = document.querySelector('[data-field=baseURL]'); field.value = 'https://draft.example.com'; field.dispatchEvent(new Event('input',{bubbles:true})); } document.getElementById('tab-general').click(); document.getElementById('tab-advanced').click()");
+      assert.equal(await js("document.querySelector('[data-field=baseURL]').value"), 'https://draft.example.com');
+      await js("document.getElementById('reloadAdvanced').click()");
     });
 
     await check('blank key blur retains stored secret; edited key persists and masks', async () => {
@@ -197,7 +243,7 @@ async function main() {
     });
 
     await check('advanced settings validate inline and save custom sources through the form', async () => {
-      await js(`document.getElementById('advanced').open = true;
+      await js(`document.getElementById('tab-advanced').click();
         document.getElementById('addCustom').click();
         document.querySelector('.custom-source [data-field=id]').value = 'test-custom';
         document.getElementById('saveAdvanced').click();`);
@@ -206,11 +252,12 @@ async function main() {
       await js(`{
         const source = document.querySelector('.custom-source');
         for (const [key, value] of Object.entries({url:'https://example.com/usage',title:'<img src=x onerror=alert(1)>',usedPath:'data.used',limitPath:'data.limit',token:'REDACTED-custom-form',headers:'{"X-Key":"REDACTED-header"}'})) source.querySelector('[data-field=' + key + ']').value = value;
-        document.querySelector('#advancedGeneral [data-field=mainSource]').value = 'test-custom';
         document.getElementById('saveAdvanced').click();
       }`);
       await until(() => controller.config.sources?.custom?.length === 1);
-      assert.equal(loadConfig().mainSource, 'test-custom');
+      await until(() => js("document.querySelector('#mainSource option[value=test-custom]') !== null"));
+      await js("document.getElementById('mainSource').value = 'test-custom'; document.getElementById('mainSource').dispatchEvent(new Event('change'))");
+      await until(() => loadConfig().mainSource === 'test-custom');
       assert.equal(loadConfig().sources.custom[0].token, 'REDACTED-custom-form');
       assert.deepEqual(loadConfig().sources.custom[0].headers, { 'X-Key': 'REDACTED-header' });
       assert.equal(await js("document.body.innerHTML.includes('REDACTED-custom-form')"), false);
@@ -228,7 +275,9 @@ async function main() {
       assert.equal(await js("document.querySelector('#advancedGeneral [data-field=baseURL]').value"), 'https://draft.example.com');
       await js("document.getElementById('reloadAdvanced').click()");
       assert.equal(await js("document.querySelector('#advancedGeneral [data-field=baseURL]').value"), controller.config.baseURL);
-      await js("document.querySelector('.remove-custom').click(); document.querySelector('#advancedGeneral [data-field=mainSource]').value = ''; document.getElementById('saveAdvanced').click()");
+      await js("document.getElementById('mainSource').value = ''; document.getElementById('mainSource').dispatchEvent(new Event('change'))");
+      await until(() => controller.config.mainSource === undefined);
+      await js("document.querySelector('.remove-custom').click(); document.getElementById('saveAdvanced').click()");
       await until(() => controller.config.sources?.custom?.length === 0);
       assert.equal(loadConfig().mainSource, undefined);
     });

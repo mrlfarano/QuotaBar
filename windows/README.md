@@ -31,7 +31,7 @@ icon-branded `QuotaBar.exe` by CI.
 |-------|---------|
 | Menu-bar item shows glyph **+ text** (`41% · ↻43m ⚠︎`) | Tray icons are icon-only on Windows — the glyph's colors + red dot carry the band, and the escalation numbers (`↻` countdowns, `%`, ⚠︎), ring legend, and per-gauge "% left" live in the live-updating tooltip |
 | Attributed menu text (colored bars/percents inline) | Native menus can't color text; each gauge row carries a band-colored ring icon next to the mono block bar |
-| Inline settings in the dropdown + a small key editor | A native Settings window (tray menus can't host text editing either): poll cadence, per-source checkboxes with live status lines, all four paste-able keys (incl. Copilot) with ×-to-delete, **Start at login** |
+| Inline settings in the dropdown + a small key editor | A separate Settings window with General, Sources, and Advanced tabs. Provider rows stay fixed when toggled; connection status stays in the tray menu. |
 | `NSAlert` discovery results | Discovery refreshes silently; configuration lives in Settings |
 | z.ai token scan: `~/Library/Application Support` browser roots | Same byte-level scan across `%LOCALAPPDATA%` Chromium roots (Chrome, Canary, Chromium, Brave, Edge, Arc, Comet) + Firefox's `%APPDATA%` webappsstore.sqlite; Edge-protected stores are never read |
 | Antigravity process scan via `ps`/`lsof` | Same scan via `Get-CimInstance` / `Get-NetTCPConnection` (netstat fallback) |
@@ -41,21 +41,25 @@ icon-branded `QuotaBar.exe` by CI.
 
 ## Configure the app
 
-Open **Settings…** from the tray menu. Poll cadence, Start at login, source
-toggles, and common keys apply immediately. **Discover Sources** scans credentials
+Open **Settings…** from the tray menu. **General** contains Start at login,
+refresh interval, and tray-source selection. **Sources** contains provider toggles
+and common keys. These settings apply immediately. **Discover Sources** scans credentials
 and refreshes the tray without opening a results alert.
 
-Expand **Advanced configuration** for tray-source selection, the Z.AI base URL
+Use **Advanced** for the Z.AI base URL
 and authorization prefix, provider access/refresh tokens and account IDs, and
 custom sources. Custom sources support a URL, bearer token, request headers,
-used/limit paths, and an optional reset field. Use **Save advanced changes** to
-validate and apply these edits; **Discard changes** restores saved values.
+used/limit paths, and an optional reset field. Use **Save changes** to
+validate and apply these edits; **Discard** restores saved values.
 
 Blank secret fields retain stored credentials, including tokens refreshed while
 Settings was open. **Clear** explicitly removes a credential. Custom headers stay
 hidden: enter a JSON object to replace them, or `{}` to clear them. Invalid input
 and save failures appear inline and retain the draft. CLI credential files are
-never edited. **Open config.json…** remains available for direct file access.
+never edited. **Open configuration file** remains available for direct file access.
+
+Start at login reads the named Windows startup entry and verifies changes after
+saving. Development runs use a separate entry that includes the app path.
 
 ## Run from source
 
@@ -115,6 +119,9 @@ packaging and smoke tests (PowerShell):
 $env:QUOTABAR_PACKAGE_OUT = Join-Path $env:TEMP 'quotabar-test-build'
 npm run test:windows
 ```
+
+The Electron suite creates and removes one uniquely named temporary Windows
+startup entry to verify registration without changing the installed app's entry.
 
 Manual release checks remain necessary for actual tray placement/DPI appearance,
 keyboard/screen-reader behavior, real Windows login registration, and live-provider

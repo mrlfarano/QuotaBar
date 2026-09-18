@@ -29,13 +29,7 @@ app.whenReady().then(async () => {
   new QuotaBarApp({ demoMode }).start();
   if (argv.includes('--settings')) {
     // Dev/verification flag: pop the Settings window without touching the tray.
-    const { openSettingsWindow } = await import('./settingswindow.js');
-    const trayApp = app.quotabarInstance;
-    openSettingsWindow({
-      getConfig: () => trayApp.config,
-      getSections: () => trayApp.sections,
-      onApply: (config) => { trayApp.config = config; trayApp.rebuild('settings'); },
-    });
+    app.quotabarInstance.openSettings();
   }
 });
 

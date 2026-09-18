@@ -20,7 +20,7 @@ export function setupAdvancedSettings(api, escapeHTML) {
     const card = document.createElement('fieldset');
     card.className = 'custom-source';
     card.dataset.originalId = source.originalId ?? '';
-    card.innerHTML = '<legend>Custom source</legend><div class="advanced-grid">'
+    card.innerHTML = '<legend>' + escapeHTML(source.title || source.id || 'New source') + '</legend><div class="advanced-grid">'
       + input('Source ID', 'id', source.id) + input('Display name', 'title', source.title)
       + input('Endpoint URL', 'url', source.url, 'url', 'https://example.com/usage')
       + credential('Bearer token', 'token', source.token)
@@ -28,21 +28,19 @@ export function setupAdvancedSettings(api, escapeHTML) {
       + input('Limit path', 'limitPath', source.limitPath, 'text', 'data.limit')
       + input('Reset field (optional)', 'resetPath', source.resetPath, 'text', 'reset_at')
       + input('Replace headers (JSON)', 'headers', '', 'password', source.headerCount ? source.headerCount + ' stored; blank keeps them' : '{"X-API-Key":"…"}')
-      + '</div><p class="hint">Paths use dots for nested values. Reset uses a top-level field. Blank headers keep existing values; {} clears them.</p>'
+      + '</div><p class="hint help">Blank headers keep existing values. Enter {} to clear them.</p>'
       + '<button type="button" class="remove-custom">Remove source</button>';
     card.querySelector('.remove-custom').onclick = () => { card.remove(); markDirty(); };
     document.getElementById('customSources').append(card);
   }
 
   function render(state) {
-    editor.innerHTML = '<div class="advanced-grid" id="advancedGeneral">'
-      + input('Tray source ID', 'mainSource', state.mainSource, 'text', 'Automatic (default: zai)')
+    editor.innerHTML = '<div class="section"><h2>Z.AI connection</h2><div class="advanced-grid" id="advancedGeneral">'
       + input('Z.AI base URL', 'baseURL', state.baseURL, 'url')
       + input('Authorization prefix', 'authScheme', state.authScheme, 'text', 'Automatic')
-      + '</div><p class="hint">Tray source: zai, github, claude, codex, openrouter, copilot, antigravity, or a custom ID. Authorization prefix includes any trailing space (for example, “Bearer ”).</p>'
-      + '<h3>Provider credentials</h3><p class="hint">CLI sign-ins are discovered automatically. Manual credentials override them. Blank secret fields keep stored values; check Clear to remove one.</p>'
-      + '<div id="advancedProviders"></div><h3>Custom sources</h3><div id="customSources"></div>'
-      + '<button id="addCustom" type="button">Add custom source</button>';
+      + '</div></div><div class="section"><h2>Provider credentials</h2><p class="hint">Leave tokens blank to keep existing sign-ins.</p>'
+      + '<div id="advancedProviders"></div></div><div class="section"><h2>Custom sources</h2><div id="customSources"></div>'
+      + '<button id="addCustom" type="button">Add source</button></div>';
     for (const provider of state.providers) {
       const card = document.createElement('details');
       card.className = 'advanced-provider';
@@ -57,7 +55,7 @@ export function setupAdvancedSettings(api, escapeHTML) {
     document.getElementById('addCustom').onclick = () => { addCustom(); markDirty(); document.querySelector('.custom-source:last-child input').focus(); };
   }
 
-  function markDirty() { dirty = true; status.textContent = 'Unsaved advanced changes'; }
+  function markDirty() { dirty = true; status.textContent = ''; }
   editor.addEventListener('input', markDirty);
   api.onInit((state) => {
     latest = state.advanced;
@@ -66,7 +64,7 @@ export function setupAdvancedSettings(api, escapeHTML) {
   document.getElementById('reloadAdvanced').onclick = () => {
     dirty = false;
     render(latest);
-    status.textContent = 'Advanced changes discarded.';
+    status.textContent = '';
   };
   document.getElementById('saveAdvanced').onclick = async () => {
     const button = document.getElementById('saveAdvanced');
@@ -74,13 +72,14 @@ export function setupAdvancedSettings(api, escapeHTML) {
     editor.disabled = true;
     try {
       const result = await api.saveAdvanced({
+        mainSource: latest.mainSource,
         ...fields(document.getElementById('advancedGeneral')),
         providers: [...document.querySelectorAll('.advanced-provider')].map((card) => ({
           refreshToken: '', clearrefreshToken: false, accountId: '', ...fields(card), id: card.dataset.id,
         })),
         custom: [...document.querySelectorAll('.custom-source')].map((card) => ({ ...fields(card), originalId: card.dataset.originalId })),
       });
-      status.textContent = result.error ?? 'Advanced settings saved.';
+      status.textContent = result.error ?? 'Saved';
       if (!result.error) { dirty = false; latest = result.state; render(latest); }
     } catch {
       status.textContent = 'Could not save settings. Your edits are still here; try again.';

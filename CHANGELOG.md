@@ -9,6 +9,10 @@ All notable changes to QuotaBar are documented here. The format follows
 ### Windows verification and regression fixes
 
 - Discover Sources now refreshes the tray without opening a results alert.
+- Reworked Windows Settings into General, Sources, and Advanced tabs with fixed
+  provider rows, consistent controls, and a persistent advanced save bar. Removed
+  dynamic status text from settings. Startup detection now reads and verifies
+  the named Windows entry, including a real registration regression test.
 - Expanded Windows Settings with tray-source selection, Z.AI endpoint options,
   provider credentials, and custom-source editing. Advanced edits validate
   before saving, retain masked credentials, and report errors inline.

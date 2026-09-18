@@ -12,33 +12,32 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import {
   POLL_CHOICES, TOGGLEABLE_SOURCES, KEY_FIELDS,
-  isSourceEnabled, setSourceEnabled, sourceStatus, maskedKey, keyValue, setKey,
+  isSourceEnabled, setSourceEnabled, maskedKey, keyValue, setKey,
 } from './core/settings.js';
 import { normalizedPollMinutes } from './core/format.js';
 import { saveConfig, configFileURL } from './core/config.js';
 import { advancedSettingsState, applyAdvancedSettings } from './core/advancedsettings.js';
 import { setupAdvancedSettings } from './settingsadvanced.js';
+import { isLoginEnabled, setLoginEnabled } from './loginitem.js';
 
 let shared = null; // shared instance so reopening re-syncs to the live config
 
 /// Opens (or re-syncs) the settings window. `getConfig` must return the
 /// controller's current config (it mutates outside this window);
-/// `getSections` the latest fetched sections (for the per-source status
-/// lines — optional, defaults to none); `onApply` receives the updated
+/// `onApply` receives the updated
 /// config after every change.
-export function openSettingsWindow({ getConfig, getSections, onApply }) {
-  const sections = getSections ?? (() => []);
+export function openSettingsWindow({ getConfig, onApply }) {
   if (shared && !shared.isDestroyed()) {
-    shared.webContents.send('settings:init', settingsState(getConfig(), sections()));
+    shared.webContents.send('settings:init', settingsState(getConfig()));
     shared.show();
     shared.focus();
     return shared;
   }
 
   shared = new BrowserWindow({
-    width: 620,
-    height: 740,
-    minWidth: 420,
+    width: 640,
+    height: 720,
+    minWidth: 480,
     minHeight: 400,
     resizable: true,
     minimizable: false,
@@ -69,7 +68,7 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
   // statuses reflect what was actually stored (and edits in one control
   // don't desync the others).
   const pushState = () => {
-    if (shared && !shared.isDestroyed()) shared.webContents.send('settings:init', settingsState(getConfig(), sections()));
+    if (shared && !shared.isDestroyed()) shared.webContents.send('settings:init', settingsState(getConfig()));
   };
 
   on('settings:init-request', () => pushState());
@@ -82,6 +81,13 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
   on('settings:set-source', (_event, id, enabled) => {
     const updated = setSourceEnabled(getConfig(), String(id), Boolean(enabled));
     saveConfig(updated);
+    onApply(updated);
+    pushState();
+  });
+  on('settings:set-main', (_event, id) => {
+    if (typeof id !== 'string' || (id && ![...TOGGLEABLE_SOURCES, ...(getConfig().sources?.custom ?? [])].some((source) => source.id === id))) return;
+    const updated = { ...getConfig(), mainSource: id || undefined };
+    if (!saveConfig(updated)) return;
     onApply(updated);
     pushState();
   });
@@ -104,7 +110,10 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
   // Start-at-login: the OS login-items registry is the source of truth
   // (never stored in config.json), re-read on every state push.
   on('settings:set-login', (_event, enabled) => {
-    app.setLoginItemSettings({ openAtLogin: Boolean(enabled) });
+    try {
+      setLoginEnabled(app, Boolean(enabled));
+      window.webContents.send('settings:login-error', '');
+    } catch (error) { window.webContents.send('settings:login-error', error.message); }
     pushState();
   });
   on('settings:open-config', () => { shell.openPath(configFileURL()); });
@@ -123,16 +132,17 @@ export function openSettingsWindow({ getConfig, getSections, onApply }) {
   return shared;
 }
 
-function settingsState(config, sections) {
+function settingsState(config) {
   return {
     advanced: advancedSettingsState(config),
     pollMinutes: normalizedPollMinutes(config.pollMinutes),
     pollChoices: POLL_CHOICES,
-    loginEnabled: app.getLoginItemSettings().openAtLogin,
+    mainSource: config.mainSource ?? '',
+    mainSources: [...TOGGLEABLE_SOURCES, ...(config.sources?.custom ?? [])].map(({ id, title }) => ({ id, title: title ?? id })),
+    loginEnabled: isLoginEnabled(app),
     sources: TOGGLEABLE_SOURCES.map(({ id, title }) => ({
       id, title,
       enabled: isSourceEnabled(config, id),
-      status: sourceStatus(id, config, sections ?? []),
     })),
     keys: KEY_FIELDS.map(({ id, title, tooltip }) => {
       const stored = keyValue(config, id);
@@ -147,83 +157,137 @@ function settingsHTML() {
 <head>
 <meta charset="utf-8">
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 13px/1.5 "Segoe UI", system-ui, sans-serif; margin: 0; padding: 16px; user-select: none; }
-  .row { display: flex; align-items: center; gap: 6px; }
-  h2 { font-size: 11px; font-weight: 600; opacity: .7; margin: 14px 0 6px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 24px; row-gap: 6px; }
-  .keyrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .keyrow label { width: 72px; }
-  .keyrow input { flex: 1; padding: 3px 6px; font-family: Consolas, monospace; }
-  .keyrow .clearbtn { margin: 0; padding: 0 7px; font-size: 13px; line-height: 18px; }
-  .status { font-size: 11px; opacity: .75; justify-self: start; }
-  select { padding: 2px 4px; }
-  button { margin-top: 14px; padding: 4px 12px; }
-  input, select, button { font: inherit; }
-  input { min-width: 0; }
-  :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
-  h1 { font-size: 20px; margin: 0 0 12px; }
-  h3 { font-size: 14px; margin: 18px 0 6px; }
-  details { margin-top: 16px; }
-  summary { cursor: pointer; font-weight: 600; }
-  fieldset { min-width: 0; border: 1px solid GrayText; border-radius: 6px; margin: 12px 0; padding: 12px; }
-  #advancedEditor { border: 0; padding: 0; }
-  .advanced-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 12px; margin-top: 12px; align-items: center; }
-  .advanced-grid input:not([type=checkbox]) { width: 100%; box-sizing: border-box; padding: 5px 6px; }
-  .clear-option { grid-column: 2; font-size: 12px; }
-  .hint { font-size: 12px; opacity: .8; }
-  #advancedStatus { min-height: 1.5em; }
-  .actions { display: flex; gap: 8px; }
-  @media (max-width: 450px) { .advanced-grid { grid-template-columns: 1fr; } .clear-option { grid-column: 1; } }
+  :root { color-scheme: light dark; --bg: #fafafa; --surface: #fff; --text: #202020; --muted: #686868; --line: #e3e3e3; --control: #fff; --accent: #0067c0; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #202020; --surface: #282828; --text: #f2f2f2; --muted: #aaa; --line: #3b3b3b; --control: #303030; --accent: #8fc9ff; } }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { font: 13px/1.5 "Segoe UI", system-ui, sans-serif; margin: 0; color: var(--text); background: var(--bg); user-select: none; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 22px 28px 0; flex-shrink: 0; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 18px; }
+  nav { display: flex; gap: 24px; border-bottom: 1px solid var(--line); }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; background: var(--control); border: 1px solid var(--line); border-radius: 4px; padding: 6px 14px; }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .45; cursor: default; }
+  nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 0 0 10px; }
+  nav button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  main { flex: 1; min-height: 0; overflow: auto; padding: 20px 28px; scrollbar-gutter: stable; }
+  h2, h3 { font-size: 13px; font-weight: 600; margin: 0 0 12px; }
+  .section + .section { margin-top: 20px; }
+  .settings-list { border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 48px; padding: 10px 14px; }
+  .setting-row + .setting-row { border-top: 1px solid var(--line); }
+  .setting-row select { max-width: 55%; }
+  .source-row { min-height: 34px; padding: 6px 14px; }
+  input:not([type=checkbox]), select { min-width: 0; border: 1px solid var(--line); border-bottom-color: var(--muted); border-radius: 4px; background: var(--control); padding: 6px 9px; }
+  input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }
+  .keyrow { display: grid; grid-template-columns: 90px minmax(0, 1fr) 28px; gap: 10px; align-items: center; margin-bottom: 6px; }
+  .clearbtn { padding: 2px; border: 0; background: none; color: var(--muted); font-size: 18px; }
+  .clearbtn:disabled { visibility: hidden; }
+  .advanced-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px 16px; align-items: center; }
+  .advanced-grid input:not([type=checkbox]) { width: 100%; }
+  .clear-option { grid-column: 2; display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  details { border-bottom: 1px solid var(--line); }
+  summary { padding: 12px 0; cursor: pointer; }
+  details .advanced-grid { padding: 2px 0 18px; }
+  fieldset { min-width: 0; }
+  #advancedEditor { border: 0; margin: 0; padding: 0; }
+  .custom-source { border: 1px solid var(--line); border-radius: 5px; padding: 16px; margin: 0 0 16px; }
+  .custom-source legend { padding: 0 6px; }
+  .remove-custom { margin-top: 16px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  .hint.help { margin: 12px 0 0; }
+  footer { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; min-height: 62px; padding: 12px 28px; border-top: 1px solid var(--line); }
+  #openConfig { background: none; border: 0; padding: 4px 0; color: var(--muted); font-size: 12px; }
+  #advancedActions { display: flex; align-items: center; gap: 8px; }
+  #advancedStatus { margin: 16px 0 0; min-height: 1.5em; font-size: 12px; color: var(--muted); }
+  #saveAdvanced { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  @media (max-width: 520px) { header { padding: 18px 20px 0; } main { padding: 20px; } footer { padding: 12px 20px; } .advanced-grid { grid-template-columns: 1fr; gap: 6px; } .advanced-grid input { margin-bottom: 6px; } .clear-option { grid-column: 1; } }
 </style>
 </head>
 <body>
-  <h1>Settings</h1>
-  <p class="hint">General settings, sources and keys apply immediately.</p>
-  <div class="row">
-    <label for="poll">Poll menu data every</label>
-    <select id="poll"></select>
-    <span>minutes</span>
-  </div>
-  <div class="row" style="margin-top: 6px">
-    <label><input type="checkbox" id="login"> Start at login</label>
-  </div>
-  <h2>Sources</h2>
-  <div class="grid" id="sources"></div>
-  <h2>Keys</h2>
-  <div id="keys"></div>
-  <details id="advanced">
-    <summary>Advanced configuration</summary>
-    <fieldset id="advancedEditor" aria-label="Advanced configuration"></fieldset>
-    <div class="actions"><button id="saveAdvanced">Save advanced changes</button><button id="reloadAdvanced">Discard changes</button></div>
-    <p id="advancedStatus" role="status" aria-live="polite"></p>
-  </details>
-  <button id="openConfig">Open config.json…</button>
+  <header>
+    <h1>Settings</h1>
+    <nav role="tablist" aria-label="Settings categories">
+      <button id="tab-general" role="tab" aria-selected="true" aria-controls="general" tabindex="0">General</button>
+      <button id="tab-sources" role="tab" aria-selected="false" aria-controls="sourceSettings" tabindex="-1">Sources</button>
+      <button id="tab-advanced" role="tab" aria-selected="false" aria-controls="advanced" tabindex="-1">Advanced</button>
+    </nav>
+  </header>
+  <main>
+    <section id="general" role="tabpanel" aria-labelledby="tab-general">
+      <div class="settings-list">
+        <label class="setting-row" for="login"><span>Start at login</span><input type="checkbox" id="login"></label>
+        <label class="setting-row" for="poll"><span>Refresh interval</span><select id="poll"></select></label>
+        <label class="setting-row" for="mainSource"><span>Tray source</span><select id="mainSource"></select></label>
+      </div>
+      <p id="loginStatus" role="status" aria-live="polite"></p>
+    </section>
+    <section id="sourceSettings" role="tabpanel" aria-labelledby="tab-sources" hidden>
+      <div class="section"><h2>Providers</h2><div class="settings-list" id="sources"></div></div>
+      <div class="section"><h2>API keys</h2><div id="keys"></div></div>
+    </section>
+    <section id="advanced" role="tabpanel" aria-labelledby="tab-advanced" hidden>
+      <fieldset id="advancedEditor" aria-label="Advanced configuration"></fieldset>
+      <p id="advancedStatus" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <footer>
+    <button id="openConfig">Open configuration file</button>
+    <div id="advancedActions" hidden><button id="reloadAdvanced">Discard</button><button id="saveAdvanced">Save changes</button></div>
+  </footer>
   <script>
     const escapeHTML = (s) => String(s).replace(/[&<>"']/g,
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     (${setupAdvancedSettings.toString()})(window.quotabar, escapeHTML);
+    window.quotabar.onLoginError((message) => { document.getElementById('loginStatus').textContent = message; });
+    const tabs = [...document.querySelectorAll('[role=tab]')];
+    function selectTab(tab) {
+      for (const item of tabs) {
+        const selected = item === tab;
+        item.setAttribute('aria-selected', selected);
+        item.tabIndex = selected ? 0 : -1;
+        document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+      }
+      document.getElementById('advancedActions').hidden = tab.id !== 'tab-advanced';
+      document.querySelector('main').scrollTop = 0;
+    }
+    for (const [index, tab] of tabs.entries()) {
+      tab.onclick = () => selectTab(tab);
+      tab.onkeydown = (event) => {
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = tabs.length - 1;
+        if (next === undefined) return;
+        event.preventDefault(); selectTab(tabs[next]); tabs[next].focus();
+      };
+    }
     window.quotabar.onInit((state) => {
-      const focusedSource = document.activeElement.matches('#sources input')
-        ? document.activeElement.dataset.id : null;
       const poll = document.getElementById('poll');
       const choices = state.pollChoices.includes(state.pollMinutes)
         ? state.pollChoices : [...state.pollChoices, state.pollMinutes].sort((a, b) => a - b);
       poll.innerHTML = choices.map((m) =>
-        '<option value="' + m + '"' + (m === state.pollMinutes ? ' selected' : '') + '>' + m + '</option>').join('');
+        '<option value="' + m + '"' + (m === state.pollMinutes ? ' selected' : '') + '>' + m + (m === 1 ? ' minute' : ' minutes') + '</option>').join('');
       poll.onchange = () => window.quotabar.setPoll(Number(poll.value));
-      // Registry-backed (not config.json): re-read on every state push so
-      // external changes to the login item are reflected.
+      const main = document.getElementById('mainSource');
+      main.innerHTML = '<option value="">Automatic</option>' + state.mainSources.map((s) =>
+        '<option value="' + escapeHTML(s.id) + '">' + escapeHTML(s.title) + '</option>').join('');
+      main.value = state.mainSource;
+      main.onchange = () => window.quotabar.setMain(main.value);
       const login = document.getElementById('login');
       login.checked = Boolean(state.loginEnabled);
       login.onchange = () => window.quotabar.setLogin(login.checked);
-      document.getElementById('sources').innerHTML = state.sources.map((s) =>
-        '<label><input type="checkbox" data-id="' + s.id + '"' + (s.enabled ? ' checked' : '') + '> ' + s.title + '</label>'
-        + (s.status ? '<span class="status">' + escapeHTML(s.status) + '</span>' : '')).join('');
-      for (const box of document.querySelectorAll('#sources input[type=checkbox]')) {
-        box.onchange = () => window.quotabar.setSource(box.dataset.id, box.checked);
+      const sources = document.getElementById('sources');
+      if (!sources.children.length) sources.innerHTML = state.sources.map((s) =>
+        '<label class="setting-row source-row"><span>' + escapeHTML(s.title) + '</span><input type="checkbox" data-id="' + s.id + '"></label>').join('');
+      for (const s of state.sources) {
+        const box = sources.querySelector('input[data-id="' + s.id + '"]');
+        box.checked = s.enabled;
+        box.onchange = () => window.quotabar.setSource(s.id, box.checked);
       }
-      if (focusedSource) document.querySelector('#sources input[data-id="' + focusedSource + '"]')?.focus();
       // Key fields hold the masked value until focused; focusing clears the
       // field for a fresh paste, blurring empty restores the old mask. The ×
       // button (stored keys only) removes the credential outright.
@@ -231,7 +295,7 @@ function settingsHTML() {
         '<div class="keyrow"><label for="key-' + k.id + '">' + k.title + '</label>'
         + '<input id="key-' + k.id + '" data-id="' + k.id + '" data-masked="1" spellcheck="false" '
         + 'value="' + escapeHTML(k.value) + '" title="' + escapeHTML(k.tooltip) + '">'
-        + (k.stored ? '<button class="clearbtn" data-id="' + k.id + '" title="Remove stored key" aria-label="Remove stored ' + escapeHTML(k.title) + ' key">×</button>' : '')
+        + '<button class="clearbtn" data-id="' + k.id + '" title="Remove stored key" aria-label="Remove stored ' + escapeHTML(k.title) + ' key"' + (k.stored ? '' : ' disabled') + '>×</button>'
         + '</div>').join('');
       for (const input of document.querySelectorAll('.keyrow input')) {
         input.dataset.mask = input.value;
