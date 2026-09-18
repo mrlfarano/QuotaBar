@@ -173,7 +173,7 @@ final class InlinePanelTests: XCTestCase {
         XCTAssertEqual(custom.count, 1, "hand-edited 45m shows as its own radio")
         XCTAssertEqual(custom[0].state, .on)
 
-        NSApp.sendAction(custom[0].action!, to: custom[0].target, from: custom[0])
+        NSApplication.shared.sendAction(custom[0].action!, to: custom[0].target, from: custom[0])
         XCTAssertEqual(applied.last?.pollMinutes, 45)
     }
 

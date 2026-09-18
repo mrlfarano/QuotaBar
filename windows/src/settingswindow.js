@@ -164,6 +164,8 @@ function settingsHTML() {
       (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     window.quotabar.settingsInitRequest();
     window.quotabar.onInit((state) => {
+      const focusedSource = document.activeElement.matches('#sources input')
+        ? document.activeElement.dataset.id : null;
       const poll = document.getElementById('poll');
       const choices = state.pollChoices.includes(state.pollMinutes)
         ? state.pollChoices : [...state.pollChoices, state.pollMinutes].sort((a, b) => a - b);
@@ -181,6 +183,7 @@ function settingsHTML() {
       for (const box of document.querySelectorAll('#sources input[type=checkbox]')) {
         box.onchange = () => window.quotabar.setSource(box.dataset.id, box.checked);
       }
+      if (focusedSource) document.querySelector('#sources input[data-id="' + focusedSource + '"]')?.focus();
       // Key fields hold the masked value until focused; focusing clears the
       // field for a fresh paste, blurring empty restores the old mask. The ×
       // button (stored keys only) removes the credential outright.

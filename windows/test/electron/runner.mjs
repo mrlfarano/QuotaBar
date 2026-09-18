@@ -109,9 +109,10 @@ async function main() {
     });
 
     await check('source checkbox disables fetching while preserving stored key', async () => {
-      await js("document.querySelector('#sources input[data-id=zai]').click()");
+      await js("{ const box = document.querySelector('#sources input[data-id=zai]'); box.focus(); box.click(); }");
       await until(() => controller.config.sources?.zai?.enabled === false);
       assert.equal(loadConfig().zaiToken, 'REDACTED-original-key');
+      await until(() => js("document.activeElement.matches('#sources input[data-id=zai]')"));
     });
 
     await check('Start at login invokes login IPC without changing provider config', async () => {
