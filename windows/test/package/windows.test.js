@@ -28,7 +28,7 @@ test('packaged Windows executable', { timeout: 60000 }, async (t) => {
     ['--parse', ['payload_real.json'], /fiveHour=\d+%/],
     ['--parse-claude', ['claude-usage.json'], /claude-5h=41%/],
     ['--parse-codex', ['codex-usage.json'], /codex-weekly=36%/],
-    ['--parse-codex', ['codex-pro-weekly.json'], /^codex-weekly=10% resets@1788272109\r?\n$/],
+    ['--parse-codex', ['codex-pro-weekly.json'], /^codex-weekly=10% resets@1788272109$/],
     ['--parse-openrouter', ['openrouter-credits.json'], /openrouter-credits=33%/],
     ['--parse-copilot', ['copilot-user.json'], /copilot-premium=20%/],
     ['--parse-antigravity', ['antigravity-userstatus.json'], /antigravity-gemini=69%/],
@@ -36,7 +36,7 @@ test('packaged Windows executable', { timeout: 60000 }, async (t) => {
   ]) {
     await t.test(flag, async () => {
       const { stdout } = await promisify(execFile)(exe, [flag, ...files.map((file) => path.join(fixtures, file))], { env, timeout: 20000, windowsHide: true });
-      assert.match(stdout, expected);
+      assert.match(stdout.trim(), expected);
     });
   }
   await t.test('invalid fixture exits with input-error code', async () => {
