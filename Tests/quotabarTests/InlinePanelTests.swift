@@ -44,7 +44,8 @@ final class InlinePanelTests: XCTestCase {
         XCTAssertEqual(checkbox?.state, .off, "Claude starts disabled")
 
         checkbox?.state = .on
-        NSApp.sendAction(checkbox!.action!, to: checkbox!.target, from: checkbox!)
+        // SwiftPM does not launch NSApplication before running AppKit tests.
+        NSApplication.shared.sendAction(checkbox!.action!, to: checkbox!.target, from: checkbox!)
 
         XCTAssertEqual(applied.count, 1)
         XCTAssertTrue(SettingsLogic.isSourceEnabled(applied[0], id: "claude"))
@@ -61,7 +62,7 @@ final class InlinePanelTests: XCTestCase {
         let radios = findButtons(in: allViews(of: panel)[0], id: "10")
         XCTAssertEqual(radios.count, 1, "poll row must contain exactly one '10' radio")
         radios[0].state = .on
-        NSApp.sendAction(radios[0].action!, to: radios[0].target, from: radios[0])
+        NSApplication.shared.sendAction(radios[0].action!, to: radios[0].target, from: radios[0])
 
         XCTAssertEqual(applied.last?.pollMinutes, 10)
         let othersOn = findButtons(in: allViews(of: panel)[0], id: "5").first?.state == .on
