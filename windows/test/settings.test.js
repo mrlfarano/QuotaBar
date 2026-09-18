@@ -5,9 +5,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizedPollMinutes, versionLabel } from '../src/core/format.js';
-import { defaultConfig } from '../src/core/config.js';
+import { defaultConfig, validateConfig } from '../src/core/config.js';
+import { makeGauge, makeSection } from '../src/core/model.js';
 import {
-  isSourceEnabled, setSourceEnabled, maskedKey, keyValue, setKey,
+  TOGGLEABLE_SOURCES, KEY_FIELDS, isSourceEnabled, setSourceEnabled,
+  maskedKey, keyValue, setKey, sourceStatus, shortStatus,
 } from '../src/core/settings.js';
 
 // MARK: poll cadence
@@ -126,6 +128,143 @@ test('toggle creates missing source object', () => {
   assert.equal(isSourceEnabled(toggled, 'copilot'), true);
   assert.equal(isSourceEnabled(toggled, 'github'), true, "toggling one source must not flip GitHub's default");
   assert.equal(isSourceEnabled(toggled, 'claude'), false);
+});
+
+// MARK: Z.AI as a toggleable source (0.11 parity)
+
+test('zai is enabled by default and listed as toggleable', () => {
+  const config = defaultConfig();
+  assert.equal(isSourceEnabled(config, 'zai'), true, 'absent sources.zai ⇒ enabled');
+  assert.equal(TOGGLEABLE_SOURCES[0].id, 'zai', 'Z.AI sits first in the picker');
+});
+
+test('zai toggle preserves top-level token', () => {
+  const config = defaultConfig();
+  config.zaiToken = 'z-secret';
+  let updated = setSourceEnabled(config, 'zai', false);
+  assert.equal(isSourceEnabled(updated, 'zai'), false);
+  assert.equal(updated.zaiToken, 'z-secret', 'toggling must not touch the token');
+  // Copy-on-write: the input config is untouched (Swift value semantics).
+  assert.equal(isSourceEnabled(config, 'zai'), true);
+
+  updated = setSourceEnabled(updated, 'zai', true);
+  assert.equal(isSourceEnabled(updated, 'zai'), true);
+  assert.equal(updated.zaiToken, 'z-secret');
+});
+
+test('legacy config without zai entry decodes enabled', () => {
+  const legacy = '{"zaiToken":"z1","baseURL":"https://api.z.ai","pollMinutes":5,"sources":{"github":{"enabled":true,"token":""}}}';
+  const config = validateConfig(JSON.parse(legacy));
+  assert.ok(config);
+  assert.equal(config.sources.zai, undefined, 'no zai key in old configs');
+  assert.equal(isSourceEnabled(config, 'zai'), true, 'old configs keep polling Z.AI');
+});
+
+test('macOS-style config round-trips with sources.zai intact', () => {
+  // Exactly what the macOS app writes when Z.AI is toggled off: the full
+  // OAuth shape under sources.zai. The loader must not strip it (the old
+  // validator silently dropped unknown keys, corrupting the shared config).
+  const fromMac = '{"zaiToken":"z1","baseURL":"https://api.z.ai","pollMinutes":5,'
+    + '"sources":{"zai":{"enabled":false,"token":"","discovered":false},"github":{"enabled":true,"token":""}}}';
+  const config = validateConfig(JSON.parse(fromMac));
+  assert.ok(config);
+  // Compare through JSON (what saveConfig writes): undefined optionals drop out.
+  assert.deepEqual(JSON.parse(JSON.stringify(config.sources.zai)), { enabled: false, token: '', discovered: false });
+  assert.equal(isSourceEnabled(config, 'zai'), false);
+
+  const reSaved = validateConfig(JSON.parse(JSON.stringify(config)));
+  assert.deepEqual(JSON.parse(JSON.stringify(reSaved.sources.zai)), { enabled: false, token: '', discovered: false });
+});
+
+test('mistyped sources.zai rejects the whole config (Swift strictness)', () => {
+  const broken = '{"zaiToken":"","baseURL":"https://api.z.ai","pollMinutes":5,'
+    + '"sources":{"zai":{"enabled":"yes"}}}';
+  assert.equal(validateConfig(JSON.parse(broken)), null);
+});
+
+test('set key zai creates enabled entry on demand', () => {
+  const config = defaultConfig(); // sources undefined
+  const updated = setKey(config, 'zai', 'z1');
+  assert.equal(updated.zaiToken, 'z1');
+  assert.equal(isSourceEnabled(updated, 'zai'), true,
+    'pasting a key reads as intent to use the source');
+});
+
+test('set key zai keeps explicit opt-out', () => {
+  const config = defaultConfig();
+  config.sources = { zai: { enabled: false, token: '', discovered: false } };
+  const updated = setKey(config, 'zai', 'z1');
+  assert.equal(isSourceEnabled(updated, 'zai'), false,
+    'pasting a key must not override the toggle');
+  assert.equal(updated.zaiToken, 'z1');
+});
+
+// MARK: per-source status lines (0.11 parity)
+
+test('source status: disabled and healthy stay silent', () => {
+  const config = defaultConfig();
+  config.sources = { claude: { enabled: false, token: '', discovered: false } };
+  const healthy = [makeSection('claude', 'Claude Pro/Max', { gauges: [makeGauge('claude-5h', '5-hour window', 41)] })];
+  assert.equal(sourceStatus('claude', config, healthy), undefined, 'disabled is silent');
+  assert.equal(sourceStatus('github', config, healthy), 'waiting for first fetch',
+    'enabled with no section yet speaks up');
+
+  const enabled = defaultConfig();
+  enabled.sources = { claude: { enabled: true, token: '', discovered: true } };
+  assert.equal(sourceStatus('claude', enabled, healthy), undefined, 'healthy is silent');
+});
+
+test('source status: error, notice, and pending data', () => {
+  const config = defaultConfig();
+  config.sources = {
+    claude: { enabled: true, token: '', discovered: true },
+    copilot: { enabled: true, token: '', discovered: true },
+  };
+  const sections = [
+    makeSection('claude', 'Claude Pro/Max', { errorMessage: 'HTTP 401 from claude\nsecond line ignored' }),
+    makeSection('github', 'GitHub API', { notice: 'token from environment' }),
+    makeSection('copilot', 'GitHub Copilot', {}),
+  ];
+  assert.equal(sourceStatus('claude', config, sections), '⚠︎ HTTP 401 from claude');
+  assert.equal(sourceStatus('github', config, sections), 'token from environment',
+    'a notice is shown as-is (short)');
+  assert.equal(sourceStatus('copilot', config, sections), 'waiting for data');
+});
+
+test('short status takes the first line and caps at 40 characters', () => {
+  assert.equal(shortStatus('single line'), 'single line');
+  assert.equal(shortStatus('first\nsecond\nthird'), 'first', 'multiline keeps the first line');
+  assert.equal(shortStatus('  padded  '), 'padded', 'whitespace is trimmed');
+  const long = 'x'.repeat(50);
+  assert.equal(shortStatus(long), 'x'.repeat(39) + '…');
+  assert.equal([...shortStatus(long)].length, 40);
+  assert.equal(shortStatus('exactly-40-characters-exactly-40-char'), 'exactly-40-characters-exactly-40-char');
+  assert.equal(shortStatus(undefined), '');
+});
+
+// MARK: Copilot key field (Windows extends macOS here: its settings window
+// can host the extra field without crowding a menu)
+
+test('copilot key round trip and precedence', () => {
+  const config = defaultConfig();
+  assert.equal(KEY_FIELDS.some((f) => f.id === 'copilot'), true, 'Copilot has a key field');
+  assert.equal(keyValue(config, 'copilot'), '');
+
+  const updated = setKey(config, 'copilot', 'ghu_1234567890');
+  assert.equal(keyValue(updated, 'copilot'), 'ghu_1234567890');
+  assert.equal(updated.sources.copilot.token, 'ghu_1234567890');
+  assert.equal(isSourceEnabled(updated, 'copilot'), true,
+    'pasting a key enables the source (the source prefers a pasted token over discovered files)');
+  assert.equal(maskedKey(keyValue(updated, 'copilot')), '********67890');
+
+  // An explicit opt-out survives key entry, like every other field.
+  const opted = defaultConfig();
+  opted.sources = { copilot: { enabled: false, token: '', refreshToken: 'r0', accountId: 'a0', discovered: true } };
+  const rekeyed = setKey(opted, 'copilot', 'ghu_x');
+  assert.equal(isSourceEnabled(rekeyed, 'copilot'), false);
+  assert.equal(rekeyed.sources.copilot.refreshToken, 'r0');
+  assert.equal(rekeyed.sources.copilot.accountId, 'a0');
+  assert.equal(rekeyed.sources.copilot.discovered, true);
 });
 
 // MARK: version label

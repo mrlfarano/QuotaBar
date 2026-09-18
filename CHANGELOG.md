@@ -4,6 +4,62 @@ All notable changes to QuotaBar are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [SemVer](https://semver.org/)-ish (`MAJOR.MINOR` while pre-1.0).
 
+## [Unreleased]
+
+### Windows verification and regression fixes
+
+- Added core, provider/auth, persistence, discovery, CLI, PNG/ICO, real Electron
+  UI/IPC, and packaged-executable test suites. CI compares all ten Windows
+  fixture outputs against a macOS Swift artifact and runs on `main`.
+- Fixed localhost TLS certificate handling, discovery overriding disabled
+  GitHub/OpenRouter sources, Start at login event routing, accumulated settings
+  IPC listeners, sender validation, packaged custom-parser argument handling,
+  menu label alignment, and missing reset-only detail rows.
+- Updated Windows tooling to Node.js 22.12+ for Electron 44. Added isolated
+  package output support and an opt-in live check that never prints credentials.
+
+### Windows port — 0.11.0 parity + first Windows release
+
+The `windows/` tray app catches up with everything above and ships:
+
+- **An errored source no longer hijacks the tray** — the macOS 0.11.0
+  status-resolution rules (`StatusDisplay.swift`) are now a ported,
+  unit-tested `core/statusdisplay.js`: the selected source falls through
+  to the next healthy provider, the warning only takes over when nothing
+  is healthy (and then names the failing source), and the cached snapshot
+  warm-starts before the first fetch. The tooltip names the driving
+  source. Settings changes landing mid-refresh re-run instead of waiting
+  for the next poll (the `RefreshCoordinator` port).
+- **Z.AI is toggleable on Windows too** — and the config loader no longer
+  silently strips `sources.zai` on save, so macOS- and Windows-written
+  `config.json` round-trip without corrupting each other.
+- **Z.AI token discovery** — Discover Sources scans every Chromium-family
+  browser's on-disk localStorage (`%LOCALAPPDATA%`: Chrome, Canary,
+  Chromium, Brave, Edge, Arc, Comet — ASCII and UTF-16LE records),
+  Firefox's `webappsstore.sqlite`, and Claude Code's z.ai bridge
+  (`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` in
+  `~/.claude/settings.json`); a real Anthropic token is never touched and
+  a user-set token is never overwritten.
+- **Settings feedback** — per-source status lines beside the checkboxes
+  (fetch error / waiting / notice), ×-to-delete on stored keys, a Copilot
+  paste field (the source already prefers a pasted token over discovered
+  files), and a **Start at login** checkbox backed by the Windows
+  login-items registry. (Also fixed: opening Settings from the tray menu
+  crashed the window — the call site predates the window's config
+  contract.)
+- **Glyph & text parity** — the red band paints the colorblind-safe
+  center dot; tray tooltips carry `↻`-marked reset countdowns (time-until,
+  not quota-left), ⚠︎ on every red band, the ring legend, and per-gauge
+  "% left"; menu titles/errors/notices clamp (48/36 chars) and gauge rows
+  pad to the longest current label so one verbose custom source can't
+  stretch the menu.
+- **Windows CI + release artifact** — CI runs the port's unit tests, the
+  byte-parity `--parse*` fixture sweep, and a packaging smoke build on
+  `windows-latest`; every `v*` tag attaches `QuotaBar-<tag>-win32-x64.zip`
+  to the GitHub release. The exe is branded with the app icon
+  (`scripts/make-ico.js` regenerates a multi-size .ico from
+  `docs/icon-1024.png`) and version metadata.
+
 ## [0.11.0] - 2026-08-28
 
 ### Fixed

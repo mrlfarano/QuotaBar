@@ -8,5 +8,7 @@ contextBridge.exposeInMainWorld('quotabar', {
   setPoll: (minutes) => ipcRenderer.send('settings:set-poll', minutes),
   setSource: (id, enabled) => ipcRenderer.send('settings:set-source', id, enabled),
   setKey: (id, key) => ipcRenderer.send('settings:set-key', id, key),
+  clearKey: (id) => ipcRenderer.send('settings:clear-key', id),
+  setLogin: (enabled) => ipcRenderer.send('settings:set-login', enabled),
   openConfig: () => ipcRenderer.send('settings:open-config'),
 });

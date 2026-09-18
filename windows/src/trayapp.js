@@ -14,7 +14,8 @@ import path from 'node:path';
 import { loadConfig, saveConfig, configFileURL, cacheFileURL } from './core/config.js';
 import { runDiscovery } from './core/discovery.js';
 import { serializeSnapshot, deserializeSnapshot } from './core/model.js';
-import { compactCount, shortReset, resetText, padToWidth, blockBar, normalizedPollMinutes, bandOf, remainingPct } from './core/format.js';
+import { compactCount, resetText, padToWidth, blockBar, normalizedPollMinutes, bandOf, remainingPct, menuClamp, gaugeLabelWidth, tooltipText } from './core/format.js';
+import { resolve, RefreshCoordinator } from './core/statusdisplay.js';
 import { dualRingPNG, gaugeRingPNG } from './ringicon.js';
 import { fetchSnapshot as fetchZai } from './core/sources/zai.js';
 import * as GitHubSource from './core/sources/github.js';
@@ -25,6 +26,7 @@ import * as OpenRouterSource from './core/sources/openrouter.js';
 import * as AntigravitySource from './core/sources/antigravity.js';
 import { fetchCustom } from './core/sources/custom.js';
 import { openSettingsWindow } from './settingswindow.js';
+import { isSourceEnabled } from './core/settings.js';
 
 const POLL_TICK_MS = 20_000; // macOS: Timer.scheduledTimer(withTimeInterval: 20)
 const TOOLTIP_MAX = 128;     // Windows tray tooltip limit
@@ -35,7 +37,7 @@ export class QuotaBarApp {
     this.config = loadConfig();
     this.snapshot = null;
     this.sections = [];
-    this.refreshing = false;
+    this.refreshGate = new RefreshCoordinator();
     this.tray = null;
     app.quotabarInstance = this; // exposed for the --settings dev flag
     this.demoGauges = [
@@ -107,8 +109,10 @@ export class QuotaBarApp {
   }
 
   async refreshNow() {
-    if (this.refreshing) return;
-    this.refreshing = true;
+    // Coalesce like the macOS RefreshCoordinator: a request landing
+    // mid-flight re-runs once when the flight ends, instead of being
+    // silently dropped until the next poll.
+    if (!this.refreshGate.begin()) return;
     try {
       if (!this.demoMode) this.setTransient('…sync');
       if (this.demoMode) {
@@ -125,17 +129,22 @@ export class QuotaBarApp {
         return;
       }
 
-      // async let zaiSnap: started first, the rest run sequentially after it.
-      const zaiPromise = fetchZai(this.config);
+      // Z.AI leads when enabled (parity with main.swift's refresh); disabled
+      // means no zai section and no snapshot write — the cache, the Updated
+      // row, and the healthy-fallback resolution keep working.
       const built = [];
-      const zai = await zaiPromise;
-      let host = this.config.baseURL;
-      try { host = new URL(this.config.baseURL).host; } catch { /* keep raw baseURL */ }
-      const level = zai.planLevel ? ` (${zai.planLevel})` : '';
-      built.push({
-        id: 'zai', title: `Z.AI Coding Plan${level} · ${host}`,
-        gauges: zai.gauges, errorMessage: zai.errorMessage, notice: undefined,
-      });
+      let zaiResult = null;
+      if (isSourceEnabled(this.config, 'zai')) {
+        const zai = await fetchZai(this.config);
+        zaiResult = zai;
+        let host = this.config.baseURL;
+        try { host = new URL(this.config.baseURL).host; } catch { /* keep raw baseURL */ }
+        const level = zai.planLevel ? ` (${zai.planLevel})` : '';
+        built.push({
+          id: 'zai', title: `Z.AI Coding Plan${level} · ${host}`,
+          gauges: zai.gauges, errorMessage: zai.errorMessage, notice: undefined,
+        });
+      }
       const sources = this.config.sources ?? {};
       if (sources.github?.enabled ?? true) {
         built.push(await GitHubSource.fetch(sources.github?.token));
@@ -163,9 +172,13 @@ export class QuotaBarApp {
         built.push(await fetchCustom(custom));
       }
       this.sections = built;
-      this.applySnapshot(zai);
+      if (zaiResult) {
+        this.applySnapshot(zaiResult);
+      } else {
+        this.rebuild('applied');
+      }
     } finally {
-      this.refreshing = false;
+      if (this.refreshGate.end()) this.refreshNow();
     }
   }
 
@@ -205,42 +218,27 @@ export class QuotaBarApp {
 
   /// Paint the tray: concentric dual-ring glyph + tooltip (green = countdown
   /// only; yellow/red escalate — numbers land in the tooltip on Windows).
+  /// What shows is decided by resolve(): the selected source, falling
+  /// through to a healthy provider, a short error when nothing is healthy,
+  /// or idle text at startup (the macOS StatusDisplayResolver rules).
   updateTray() {
     if (this.demoMode) {
       if (this.snapshot?.gauges.some((g) => g.id === 'fiveHour')) {
-        this.applyGlyph(true);
+        this.applyGlyph(this.snapshot.gauges);
       } else {
         this.setTransient('Z·demo');
       }
       return;
     }
-    if (!this.snapshot) { this.setTransient('quotabar…'); return; }
-    const message = this.snapshot.errorMessage;
-    if (message) {
-      const auth = message.includes('token') || message.includes('Unauthorized');
-      this.setTransient(auth ? '⚠︎ z.ai auth' : '⚠︎ z.ai');
-      return;
+    const display = resolve(this.sections, this.snapshot, this.config.mainSource);
+    if (display.kind === 'gauges') {
+      this.applyGlyph(display.gauges, display.title);
+    } else {
+      this.setTransient(display.text);
     }
-    if (!this.snapshot.gauges.some((g) => g.id === 'fiveHour' || g.id === 'week')) {
-      this.setTransient('z.ai');
-      return;
-    }
-    this.applyGlyph(false);
   }
 
-  /// Gauges driving the tray: the source selected by config.mainSource
-  /// (or "zai" default), falling back to z.ai, then any healthy section.
-  statusGauges() {
-    const wanted = (this.config.mainSource ?? 'zai').toLowerCase();
-    const match = this.sections.find((s) => s.id === wanted && s.gauges.length > 0);
-    if (match) return match.gauges;
-    const zai = this.sections.find((s) => s.id === 'zai' && s.gauges.length > 0);
-    if (zai) return zai.gauges;
-    return this.sections.find((s) => s.gauges.length > 0)?.gauges;
-  }
-
-  applyGlyph(demo) {
-    const gauges = demo ? this.snapshot.gauges : this.statusGauges() ?? this.snapshot.gauges;
+  applyGlyph(gauges, title = undefined) {
     if (gauges.length === 0) { this.setTransient('⚠︎ no data'); return; }
     const primary = gauges[0];
     const secondary = gauges.length > 1 ? gauges[1] : null;
@@ -261,16 +259,11 @@ export class QuotaBarApp {
     }) });
     this.tray.setImage(icon);
 
-    let tip = 'Z.AI Coding Plan';
-    for (const gauge of gauges) {
-      tip += `\n${gauge.label}: ${Math.round(gauge.pct)}% used`;
-      if (gauge.used != null && gauge.total != null) {
-        tip += ` (${compactCount(gauge.used)}/${compactCount(gauge.total)} tokens)`;
-      }
-      const reset = resetText(gauge.resetAt);
-      if (reset) tip += ` · ${reset}`;
-    }
-    this.tray.setToolTip(tip.length > TOOLTIP_MAX ? tip.slice(0, TOOLTIP_MAX - 1) + '…' : tip);
+    // The driving source names the tooltip (warm-start cache has no title;
+    // it is always z.ai's snapshot), then legend, escalation, per-gauge
+    // lines — truncated to Windows' 128-char tooltip budget.
+    const fullTip = tooltipText({ title: title ?? 'Z.AI Coding Plan', gauges });
+    this.tray.setToolTip(fullTip.length > TOOLTIP_MAX ? fullTip.slice(0, TOOLTIP_MAX - 1) + '…' : fullTip);
   }
 
   /// Full-strength state for transient/error states (macOS swaps the text;
@@ -297,15 +290,18 @@ export class QuotaBarApp {
     if (this.sections.length === 0) {
       templateAdd(disabled('No data yet'));
     }
+    // Longest gauge label across sections, so every bar row aligns even
+    // with verbose custom-source labels (floor: the original 13).
+    const labelWidth = gaugeLabelWidth(this.sections);
     for (const section of this.sections) {
-      templateAdd(disabled(section.title));
+      templateAdd(disabled(menuClamp(section.title)));
       if (section.errorMessage) {
-        templateAdd(disabled(`⚠︎ ${section.errorMessage}`));
+        templateAdd(disabled(`⚠︎ ${menuClamp(section.errorMessage)}`));
       } else if (section.gauges.length === 0) {
         templateAdd(disabled('Waiting for data'));
       }
       if (section.notice) {
-        templateAdd(disabled(section.notice));
+        templateAdd(disabled(menuClamp(section.notice)));
       }
       for (const gauge of section.gauges) {
         const band = bandOf(remainingPct(gauge.pct));
@@ -314,7 +310,7 @@ export class QuotaBarApp {
         icon.addRepresentation({ scaleFactor: 2, buffer: gaugeRingPNG({ size: 32, pct: gauge.pct, band }) });
         templateAdd({
           icon,
-          label: `${padToWidth(gauge.label, 13)}  ${blockBar(gauge.pct)}  ${Math.round(gauge.pct)}% used · ${Math.round(remainingPct(gauge.pct))}% left`,
+          label: `${padToWidth(gauge.label, labelWidth)}  ${blockBar(gauge.pct)}  ${Math.round(gauge.pct)}% used · ${Math.round(remainingPct(gauge.pct))}% left`,
           enabled: false,
         });
 
@@ -324,7 +320,7 @@ export class QuotaBarApp {
           detail = `${compactCount(gauge.used)} / ${compactCount(gauge.total)} ${unit}`;
         }
         const reset = resetText(gauge.resetAt);
-        if (reset) detail += detail === '' ? '' : ' · ' + reset;
+        if (reset) detail += detail === '' ? reset : ' · ' + reset;
         if (detail !== '') templateAdd(disabled(`    ${detail}`));
       }
       templateAdd({ type: 'separator' });
@@ -339,7 +335,7 @@ export class QuotaBarApp {
       templateAdd(disabled('Status Bar Source:'));
       const active = (this.config.mainSource ?? 'zai').toLowerCase();
       for (const id of healthyIds) {
-        const name = this.sections.find((s) => s.id === id)?.title ?? id;
+        const name = menuClamp(this.sections.find((s) => s.id === id)?.title ?? id, 36);
         templateAdd({
           label: name,
           type: 'checkbox',
@@ -407,8 +403,8 @@ export class QuotaBarApp {
 
   openSettings() {
     openSettingsWindow({
-      config: this.config,
-      onRefresh: (config) => { this.config = config; },
+      getConfig: () => this.config,
+      getSections: () => this.sections,
       onApply: (config) => {
         this.config = config;
         this.rebuild('settings');

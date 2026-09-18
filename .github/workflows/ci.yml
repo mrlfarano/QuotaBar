@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -41,3 +41,68 @@ jobs:
 
       - name: App bundle builds
         run: ./scripts/make-app.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Record Swift parser output
+        run: node windows/scripts/parser-parity.js --record .build/release/quotabar swift-parser-output.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-parser-output
+          path: swift-parser-output.json
+
+  windows:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Electron tray and settings integration
+        run: npm run test:electron
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-parser-output
+          path: windows/build/parity
+
+      - name: Compare Windows and Swift parser output
+        run: node scripts/parser-parity.js --compare build/parity/swift-parser-output.json
+
+      # Each --parse* flag exits nonzero when the fixture yields no gauges.
+      # The Windows port must stay byte-identical to the Swift binary above.
+      - name: Offline parser checks
+        run: |
+          node src/cli.js --parse             ../testdata/payload_real.json
+          node src/cli.js --parse             ../testdata/payload_a.json
+          node src/cli.js --parse             ../testdata/payload_b.json
+          node src/cli.js --parse             ../testdata/payload_c.json
+          node src/cli.js --parse-claude      ../testdata/claude-usage.json
+          node src/cli.js --parse-codex       ../testdata/codex-usage.json
+          node src/cli.js --parse-openrouter  ../testdata/openrouter-credits.json
+          node src/cli.js --parse-copilot     ../testdata/copilot-user.json
+          node src/cli.js --parse-antigravity ../testdata/antigravity-userstatus.json
+          node src/cli.js --parse-custom      ../testdata/custom-config.json ../testdata/custom-payload.json
+
+      - name: Package smoke build (exe + icon + metadata)
+        run: npm run package:win
+
+      - name: Packaged executable smoke tests
+        run: npm run test:package

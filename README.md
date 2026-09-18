@@ -61,7 +61,9 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] ↻9h24m
 | **Custom** (n many) | any JSON with used/limit (+reset) | whatever you configure | yours |
 
 A **Windows port** (system-tray app, same sources/parsers/config/glyph)
-lives in [`windows/`](windows/README.md).
+lives in [`windows/`](windows/README.md) — at feature parity with this
+app since 0.11.0, including the z.ai browser-token discovery, and shipped
+as a packaged `QuotaBar.exe` by CI on every release.
 
 The **Status Bar Source** picker decides whose numbers drive the rings;
 anything that fails falls back to the next healthy provider — error states

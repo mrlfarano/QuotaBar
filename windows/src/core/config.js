@@ -93,7 +93,9 @@ function validateSources(json) {
     if (custom.some((c) => c === null)) return null;
     out.custom = custom;
   }
-  for (const key of ['claude', 'codex', 'openrouter', 'copilot', 'antigravity']) {
+  // `zai` shares the OAuth source shape (its token lives at the top level,
+  // `zaiToken`) — the macOS toggle writes the full object.
+  for (const key of ['zai', 'claude', 'codex', 'openrouter', 'copilot', 'antigravity']) {
     if (o[key] !== undefined) {
       const source = validateOAuthSource(o[key]);
       if (!source) return null;

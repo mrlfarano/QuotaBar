@@ -97,3 +97,57 @@ export function blockBar(pct, width = 12) {
 export function normalizedPollMinutes(value) {
   return Math.min(Math.max(Math.trunc(value), 1), 60);
 }
+
+// MARK: - 0.11 parity (EscalationText, tooltip, menu hygiene)
+
+/// The escalating status text as a plain string (port of EscalationText):
+/// calm when green — countdown only; numbers when it matters; `↻` marks
+/// the countdown as time-until-reset, not quota-left; red always carries
+/// ⚠︎, with or without a countdown.
+export function escalationText(gauge, now = new Date()) {
+  const remaining = Math.round(remainingPct(gauge.pct));
+  const short = shortReset(gauge.resetAt, now);
+  const band = bandOfGauge(gauge);
+  if (band === Band.GREEN) return short ? `↻${short}` : `${remaining}%`;
+  let text = `${remaining}%`;
+  if (short) text += ` · ↻${short}`;
+  if (band === Band.RED) text += ' ⚠︎';
+  return text;
+}
+
+/// The tray tooltip — Windows' only text channel next to the glyph.
+/// First line names the driving source and the ring legend, then the
+/// primary gauge's escalation, then one line per gauge with "% left"
+/// (parity with the macOS tooltip). Callers truncate to the OS's
+/// 128-character budget.
+export function tooltipText({ title, gauges, now = new Date() }) {
+  const lines = [`${title} — outer ring = 5-hour window · inner ring = weekly limit`];
+  if (gauges.length > 0) lines.push(escalationText(gauges[0], now));
+  for (const gauge of gauges) {
+    let line = `${gauge.label}: ${Math.round(gauge.pct)}% used · ${Math.round(remainingPct(gauge.pct))}% left`;
+    if (gauge.used != null && gauge.total != null) {
+      line += ` (${compactCount(gauge.used)}/${compactCount(gauge.total)} tokens)`;
+    }
+    const reset = resetText(gauge.resetAt, now);
+    if (reset) line += ` · ${reset}`;
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
+/// Ellipsis-truncate past the cap (the Swift menu's `truncated`): section
+/// titles, error rows, and notices at 48; Status-Bar-Source picker rows at
+/// 36 — one verbose custom source must not stretch the whole menu.
+export function menuClamp(text, max = 48) {
+  const s = String(text ?? '');
+  if ([...s].length <= max) return s;
+  return [...s].slice(0, max - 1).join('').trimEnd() + '…';
+}
+
+/// Longest gauge label across all sections, floored at the original 13 —
+/// every bar row pads to it so the block bars align even with verbose
+/// custom-source labels.
+export function gaugeLabelWidth(sections) {
+  const longest = Math.max(0, ...(sections ?? []).flatMap((s) => (s.gauges ?? []).map((g) => [...String(g.label)].length)));
+  return Math.max(13, longest);
+}

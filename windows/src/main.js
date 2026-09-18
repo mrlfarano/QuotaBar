@@ -7,9 +7,9 @@ import { runCli, runProbe } from './cli.js';
 import { loadConfig } from './core/config.js';
 import { QuotaBarApp } from './trayapp.js';
 
-// Electron dev runs inject the app path ('.') as argv[1]; packaged builds
-// don't. Strip it so flag parsing matches the Swift binary's.
-const argv = process.argv.slice(1).filter((arg, index) => !(index === 0 && arg === '.'));
+// runCli expects the program name at index 0. Electron dev runs also inject
+// the app path at argv[1], while packaged builds start flags at argv[1].
+const argv = ['quotabar', ...process.argv.slice(app.isPackaged ? 1 : 2)];
 const demoMode = argv.includes('--demo');
 
 // Offline parser checks never touch the GUI.
@@ -31,7 +31,11 @@ app.whenReady().then(async () => {
     // Dev/verification flag: pop the Settings window without touching the tray.
     const { openSettingsWindow } = await import('./settingswindow.js');
     const trayApp = app.quotabarInstance;
-    openSettingsWindow({ getConfig: () => trayApp.config, onApply: (config) => { trayApp.config = config; trayApp.rebuild('settings'); } });
+    openSettingsWindow({
+      getConfig: () => trayApp.config,
+      getSections: () => trayApp.sections,
+      onApply: (config) => { trayApp.config = config; trayApp.rebuild('settings'); },
+    });
   }
 });
 
