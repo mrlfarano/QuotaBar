@@ -60,10 +60,11 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] ↻9h24m
 | **GitHub** (`github`) | API core rate limit | optional `GH_TOKEN` | official |
 | **Custom** (n many) | any JSON with used/limit (+reset) | whatever you configure | yours |
 
-A **Windows port** (system-tray app, same sources/parsers/config/glyph)
-lives in [`windows/`](windows/README.md) — at feature parity with this
-app since 0.11.0, including the z.ai browser-token discovery, and shipped
-as a packaged `QuotaBar.exe` by CI on every release.
+A **Windows port** lives in [`windows/`](windows/README.md). Windows 0.12.0
+adds a colorful usage panel with provider logos, inline quota details, pinning,
+optional alerts, and pause controls. The panel releases its renderer when closed;
+right-click still opens the native tray menu. Provider parsers and the shared
+configuration remain compatible with macOS.
 
 The **Status Bar Source** picker decides whose numbers drive the rings;
 anything that fails falls back to the next healthy provider — error states

@@ -18,20 +18,27 @@ if (cliCode !== null) {
   process.exit(cliCode);
 }
 
-app.whenReady().then(async () => {
-  if (process.platform === 'darwin') app.dock?.hide(); // menu-bar only, no Dock icon (dev runs on macOS)
+if (!argv.includes('--probe') && !app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => app.quotabarInstance?.openPanel());
 
-  if (argv.includes('--probe')) {
-    const code = await runProbe(argv, process, loadConfig());
-    process.exit(code);
-  }
+  app.whenReady().then(async () => {
+    if (process.platform === 'darwin') app.dock?.hide(); // menu-bar only, no Dock icon (dev runs on macOS)
 
-  new QuotaBarApp({ demoMode }).start();
-  if (argv.includes('--settings')) {
-    // Dev/verification flag: pop the Settings window without touching the tray.
-    app.quotabarInstance.openSettings();
-  }
-});
+    if (argv.includes('--probe')) {
+      const code = await runProbe(argv, process, loadConfig());
+      process.exit(code);
+    }
+
+    new QuotaBarApp({ demoMode }).start();
+    if (argv.includes('--settings')) {
+      // Dev/verification flag: pop the Settings window without touching the tray.
+      app.quotabarInstance.openSettings();
+    }
+    if (argv.includes('--panel')) app.quotabarInstance.openPanel();
+  });
+}
 
 // Tray app: closing the (rare) windows must not quit the process.
 app.on('window-all-closed', () => {});

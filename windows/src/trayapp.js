@@ -27,9 +27,13 @@ import * as AntigravitySource from './core/sources/antigravity.js';
 import { fetchCustom } from './core/sources/custom.js';
 import { openSettingsWindow } from './settingswindow.js';
 import { isSourceEnabled } from './core/settings.js';
+import { isLoginEnabled, setLoginEnabled } from './loginitem.js';
+import { openUsagePanel } from './usagewindow.js';
+import { applyReading, cachedReadings, defaultPreferences, loadPreferences, paused, quotaAlert, readWindowsFile, validatePreferences, writeWindowsFile } from './core/windowsstate.js';
 
-const POLL_TICK_MS = 20_000; // macOS: Timer.scheduledTimer(withTimeInterval: 20)
 const TOOLTIP_MAX = 128;     // Windows tray tooltip limit
+const BUILTIN_IDS = ['zai', 'github', 'copilot', 'claude', 'codex', 'openrouter', 'antigravity'];
+const customId = source => BUILTIN_IDS.includes(source.id.toLowerCase()) ? `custom:${source.id.toLowerCase()}` : source.id.toLowerCase();
 
 export class QuotaBarApp {
   constructor({ demoMode }) {
@@ -39,6 +43,14 @@ export class QuotaBarApp {
     this.sections = [];
     this.refreshGate = new RefreshCoordinator();
     this.tray = null;
+    this.preferences = demoMode ? defaultPreferences() : loadPreferences();
+    if (demoMode) this.config.mainSource = 'codex';
+    this.readings = new Map();
+    this.lastRefreshAt = 0;
+    this.pendingRefresh = new Set();
+    this.lastAlertReading = null;
+    this.panel = null;
+    this.stateVersion = 0;
     app.quotabarInstance = this; // exposed for the --settings dev flag
     this.demoGauges = [
       { id: 'fiveHour', label: '5-hour window', pct: 24, used: 28_800, total: 120_000,
@@ -54,11 +66,14 @@ export class QuotaBarApp {
     // Created after app ready — mirrors the macOS comment about accessory
     // activation policy needing to be applied first.
     this.tray = new Tray(stateIcon(null));
-    this.runLaunchDiscovery();
     this.loadCachedSnapshot();
+    if (!this.demoMode) this.readings = new Map(cachedReadings(readWindowsFile('windows-readings.json')).map(p => [p.id, p]));
+    this.tray.on('click', () => this.openPanel());
+    this.tray.on('right-click', () => this.tray.popUpContextMenu(this.buildMenu()));
     this.rebuild('launch');
-    this.refreshNow();
-    setInterval(() => this.pollTick(), POLL_TICK_MS);
+    if (!this.demoMode) this.runLaunchDiscovery();
+    if (!paused(this.preferences) && !this.preferences.manual) this.refreshNow();
+    this.schedulePoll();
   }
 
   // MARK: discovery
@@ -74,47 +89,31 @@ export class QuotaBarApp {
   // MARK: polling
 
   pollTick() {
-    if (this.demoMode) {
-      this.demoAdvance();
-      this.rebuild('demo-tick');
-      return;
-    }
-    if (!this.snapshot) {
-      this.refreshNow();
-      return;
-    }
-    const age = (Date.now() - this.snapshot.fetchedAt.getTime()) / 1000;
+    if (this.demoMode || paused(this.preferences) || this.preferences.manual) return;
+    const age = (Date.now() - this.lastRefreshAt) / 1000;
     if (age >= normalizedPollMinutes(this.config.pollMinutes) * 60) {
       this.refreshNow();
     }
   }
 
-  demoAdvance() {
-    // Sweep upward so all color bands appear over time.
-    for (const gauge of this.demoGauges) {
-      gauge.pct = gauge.pct >= 100 ? 0 : gauge.pct + 1.5;
-      if (gauge.total != null) gauge.used = (gauge.total * gauge.pct) / 100;
-      if (gauge.resetAt && gauge.resetAt.getTime() - Date.now() < 120_000) {
-        gauge.resetAt = new Date(Date.now() + (gauge.id === 'fiveHour' ? 5 * 3600 : 7 * 86400) * 1000);
-      }
-    }
-    this.snapshot = {
-      fetchedAt: new Date(),
-      rawJSON: '',
-      gauges: this.demoGauges.map((g) => ({ ...g })),
-      errorMessage: undefined,
-      usedScheme: '',
-      planLevel: undefined,
-    };
+  schedulePoll() {
+    clearTimeout(this.pollTimer);
+    if (this.demoMode || this.refreshGate.running || this.preferences.pauseUntil === -1 || this.preferences.manual) return;
+    const due = Math.max(this.lastRefreshAt + normalizedPollMinutes(this.config.pollMinutes) * 60_000, this.preferences.pauseUntil);
+    this.pollTimer = setTimeout(() => { this.pollTick(); this.schedulePoll(); }, Math.max(1000, due - Date.now()));
+    this.pollTimer.unref();
   }
 
-  async refreshNow() {
+  async refreshNow(target = null) {
     // Coalesce like the macOS RefreshCoordinator: a request landing
     // mid-flight re-runs once when the flight ends, instead of being
     // silently dropped until the next poll.
-    if (!this.refreshGate.begin()) return;
+    if (!this.refreshGate.begin()) {
+      for (const id of target == null ? ['*'] : Array.isArray(target) ? target : [target]) this.pendingRefresh.add(id);
+      return;
+    }
+    const targets = target == null ? null : new Set(Array.isArray(target) ? target : [target]);
     try {
-      if (!this.demoMode) this.setTransient('…sync');
       if (this.demoMode) {
         this.sections = [
           { id: 'zai', title: 'Demo data (--demo)', gauges: this.demoGauges.map((g) => ({ ...g })), errorMessage: undefined, notice: undefined },
@@ -122,6 +121,11 @@ export class QuotaBarApp {
             gauges: [{ id: 'gh-core', label: 'Core requests', pct: 8, used: 5, total: 60,
                        resetAt: new Date(Date.now() + 40 * 60_000), details: undefined }] },
         ];
+        this.sections.push(
+          { id: 'codex', title: 'Codex', gauges: [{ id: 'codex-weekly', label: 'Weekly', pct: 58, resetAt: new Date(Date.now() + 76 * 3600000) }] },
+          { id: 'claude', title: 'Claude', gauges: [{ id: 'claude-5h', label: '5-hour', pct: 24, resetAt: new Date(Date.now() + 167 * 60000) }, { id: 'claude-weekly', label: 'Weekly', pct: 12, resetAt: new Date(Date.now() + 99 * 3600000) }] },
+        );
+        for (const section of this.sections) this.readings.set(section.id, applyReading(this.readings.get(section.id), section));
         this.applySnapshot({
           fetchedAt: new Date(), rawJSON: '', gauges: this.demoGauges.map((g) => ({ ...g })),
           errorMessage: undefined, usedScheme: '', planLevel: undefined,
@@ -132,54 +136,79 @@ export class QuotaBarApp {
       // Z.AI leads when enabled (parity with main.swift's refresh); disabled
       // means no zai section and no snapshot write — the cache, the Updated
       // row, and the healthy-fallback resolution keep working.
-      const built = [];
-      let zaiResult = null;
-      if (isSourceEnabled(this.config, 'zai')) {
-        const zai = await fetchZai(this.config);
-        zaiResult = zai;
-        let host = this.config.baseURL;
-        try { host = new URL(this.config.baseURL).host; } catch { /* keep raw baseURL */ }
-        const level = zai.planLevel ? ` (${zai.planLevel})` : '';
-        built.push({
-          id: 'zai', title: `Z.AI Coding Plan${level} · ${host}`,
-          gauges: zai.gauges, errorMessage: zai.errorMessage, notice: undefined,
-        });
-      }
-      const sources = this.config.sources ?? {};
-      if (sources.github?.enabled ?? true) {
-        built.push(await GitHubSource.fetch(sources.github?.token));
-      }
-      if (sources.copilot?.enabled ?? false) {
-        built.push(await CopilotSource.fetch(sources.copilot));
-      }
-      if (sources.claude?.enabled ?? false) {
-        const { section, tokenUpdate } = await ClaudeSource.fetch(sources.claude);
-        if (tokenUpdate) { this.config.sources.claude = tokenUpdate; saveConfig(this.config); }
-        built.push(section);
-      }
-      if (sources.codex?.enabled ?? false) {
-        const { section, tokenUpdate } = await CodexSource.fetch(sources.codex);
-        if (tokenUpdate) { this.config.sources.codex = tokenUpdate; saveConfig(this.config); }
-        built.push(section);
-      }
-      if (sources.openrouter?.enabled ?? false) {
-        built.push(await OpenRouterSource.fetch(sources.openrouter));
-      }
-      if (sources.antigravity?.enabled ?? false) {
-        built.push(await AntigravitySource.fetch());
-      }
-      for (const custom of sources.custom ?? []) {
-        built.push(await fetchCustom(custom));
-      }
-      this.sections = built;
-      if (zaiResult) {
-        this.applySnapshot(zaiResult);
-      } else {
-        this.rebuild('applied');
+      const enabled = this.enabledIds();
+      this.sections = this.sections.filter(s => enabled.includes(s.id));
+      for (const id of enabled) {
+        if (targets && !targets.has(id)) continue;
+        let section;
+        try { section = await this.fetchProvider(id); }
+        catch { section = { id, title: id, gauges: [], errorMessage: 'Provider request failed' }; }
+        if (!this.enabledIds().includes(id)) continue;
+        this.sections = [...this.sections.filter(s => s.id !== id), section];
+        this.sections.sort((a, b) => enabled.indexOf(a.id) - enabled.indexOf(b.id));
+        this.readings.set(id, applyReading(this.readings.get(id), section));
+        this.checkAlerts(id);
+        this.rebuild('provider');
       }
     } finally {
-      if (this.refreshGate.end()) this.refreshNow();
+      if (!targets) this.lastRefreshAt = Date.now();
+      if (!this.demoMode) {
+        try { writeWindowsFile('windows-readings.json', { version: 1, providers: [...this.readings.values()] }); } catch { /* Cache is optional. */ }
+      }
+      const rerun = this.refreshGate.end();
+      this.rebuild('applied');
+      this.schedulePoll();
+      if (rerun) {
+        const pending = [...this.pendingRefresh];
+        this.pendingRefresh.clear();
+        this.refreshNow(pending.includes('*') || !pending.length ? null : pending);
+      }
     }
+  }
+
+  enabledIds() {
+    return BUILTIN_IDS.filter(id => isSourceEnabled(this.config, id))
+      .concat((this.config.sources?.custom ?? []).map(customId));
+  }
+
+  async fetchProvider(id) {
+    const custom = this.config.sources?.custom?.find(s => customId(s) === id);
+    if (custom) return { ...await fetchCustom(custom), id };
+    const source = this.config.sources?.[id];
+    if (id === 'zai') {
+      const snap = await fetchZai(this.config);
+      this.snapshot = snap;
+      this.saveCachedSnapshot(snap);
+      if (!snap.errorMessage && snap.gauges.length && snap.usedScheme !== this.config.authScheme) {
+        this.config.authScheme = snap.usedScheme;
+        saveConfig(this.config);
+      }
+      return { id, title: 'Z.AI Coding Plan', gauges: snap.gauges, errorMessage: snap.errorMessage };
+    }
+    if (id === 'github') return GitHubSource.fetch(source?.token);
+    if (id === 'copilot') return CopilotSource.fetch(source);
+    if (id === 'openrouter') return OpenRouterSource.fetch(source);
+    if (id === 'antigravity') return AntigravitySource.fetch();
+    if (id === 'claude' || id === 'codex') {
+      const { section, tokenUpdate } = await (id === 'claude' ? ClaudeSource : CodexSource).fetch(source);
+      if (tokenUpdate && this.config.sources?.[id] === source) { this.config.sources[id] = tokenUpdate; saveConfig(this.config); }
+      return section;
+    }
+    throw new Error('Unknown provider');
+  }
+
+  checkAlerts(id) {
+    if (id !== (this.config.mainSource ?? 'zai') || this.demoMode) return;
+    const reading = this.readings.get(id);
+    if (reading.status !== 'Connected') return;
+    const gauge = reading.gauges.find(g => g.id === this.preferences.watched[id]) ?? reading.gauges[0];
+    if (!gauge) return;
+    const current = { key: `${id}:${gauge.id}`, left: 100 - gauge.pct, resetAt: gauge.resetAt };
+    const previous = this.lastAlertReading;
+    const events = quotaAlert(previous, current, this.preferences);
+    current.alertedReset = events.includes('low') ? current.resetAt : previous?.key === current.key ? previous.alertedReset : undefined;
+    this.lastAlertReading = current;
+    for (const event of events) this.tray?.displayBalloon({ title: `${reading.name} · ${gauge.label}`, content: event === 'low' ? `${Math.round(current.left)}% quota remaining.` : 'Quota is available again.', iconType: 'info', respectQuietTime: true });
   }
 
   applySnapshot(snap) {
@@ -222,17 +251,12 @@ export class QuotaBarApp {
   /// through to a healthy provider, a short error when nothing is healthy,
   /// or idle text at startup (the macOS StatusDisplayResolver rules).
   updateTray() {
-    if (this.demoMode) {
-      if (this.snapshot?.gauges.some((g) => g.id === 'fiveHour')) {
-        this.applyGlyph(this.snapshot.gauges);
-      } else {
-        this.setTransient('Z·demo');
-      }
-      return;
-    }
-    const display = resolve(this.sections, this.snapshot, this.config.mainSource);
+    const display = resolve(this.sections, isSourceEnabled(this.config, 'zai') ? this.snapshot : null, this.config.mainSource);
     if (display.kind === 'gauges') {
-      this.applyGlyph(display.gauges, display.title);
+      const section = this.sections.find(s => s.gauges === display.gauges);
+      const watched = this.preferences.watched[section?.id];
+      const gauges = [...display.gauges].sort((a, b) => Number(b.id === watched) - Number(a.id === watched));
+      this.applyGlyph(gauges, display.title);
     } else {
       this.setTransient(display.text);
     }
@@ -244,42 +268,46 @@ export class QuotaBarApp {
     const secondary = gauges.length > 1 ? gauges[1] : null;
 
     // Outer = first available window, inner = second (when present).
-    const icon = nativeImage.createEmpty();
-    icon.addRepresentation({ scaleFactor: 1, buffer: dualRingPNG({
-      size: 16,
-      fiveRemaining: remainingPct(primary.pct), fiveBand: bandOf(remainingPct(primary.pct)),
-      weekRemaining: secondary != null ? remainingPct(secondary.pct) : null,
-      weekBand: secondary != null ? bandOf(remainingPct(secondary.pct)) : null,
-    }) });
-    icon.addRepresentation({ scaleFactor: 2, buffer: dualRingPNG({
-      size: 32,
-      fiveRemaining: remainingPct(primary.pct), fiveBand: bandOf(remainingPct(primary.pct)),
-      weekRemaining: secondary != null ? remainingPct(secondary.pct) : null,
-      weekBand: secondary != null ? bandOf(remainingPct(secondary.pct)) : null,
-    }) });
-    this.tray.setImage(icon);
+    const imageKey = JSON.stringify([primary.pct, secondary?.pct]);
+    if (this.imageKey !== imageKey) {
+      const icon = nativeImage.createEmpty();
+      icon.addRepresentation({ scaleFactor: 1, buffer: dualRingPNG({
+        size: 16,
+        fiveRemaining: remainingPct(primary.pct), fiveBand: bandOf(remainingPct(primary.pct)),
+        weekRemaining: secondary != null ? remainingPct(secondary.pct) : null,
+        weekBand: secondary != null ? bandOf(remainingPct(secondary.pct)) : null,
+      }) });
+      icon.addRepresentation({ scaleFactor: 2, buffer: dualRingPNG({
+        size: 32,
+        fiveRemaining: remainingPct(primary.pct), fiveBand: bandOf(remainingPct(primary.pct)),
+        weekRemaining: secondary != null ? remainingPct(secondary.pct) : null,
+        weekBand: secondary != null ? bandOf(remainingPct(secondary.pct)) : null,
+      }) });
+      this.tray.setImage(icon);
+      this.imageKey = imageKey;
+    }
 
     // The driving source names the tooltip (warm-start cache has no title;
     // it is always z.ai's snapshot), then legend, escalation, per-gauge
     // lines — truncated to Windows' 128-char tooltip budget.
-    const fullTip = tooltipText({ title: title ?? 'Z.AI Coding Plan', gauges });
+    const fullTip = (paused(this.preferences) ? 'Paused · ' : this.preferences.manual ? 'Manual · ' : '') + tooltipText({ title: title ?? 'Z.AI Coding Plan', gauges });
     this.tray.setToolTip(fullTip.length > TOOLTIP_MAX ? fullTip.slice(0, TOOLTIP_MAX - 1) + '…' : fullTip);
   }
 
   /// Full-strength state for transient/error states (macOS swaps the text;
   /// Windows swaps in a muted empty glyph and explains in the tooltip).
   setTransient(text) {
-    this.tray.setImage(stateIcon());
+    if (this.imageKey !== 'empty') this.tray.setImage(stateIcon());
+    this.imageKey = 'empty';
     this.tray.setToolTip(text);
   }
 
   // MARK: menu
 
-  /// Recompute every menu row from current state. Called on updates; the
-  /// tray's context menu is replaced wholesale (safe while closed).
+  /// Update visible state. Build the native menu only when requested.
   rebuild(reason) {
-    this.updateTray();
-    this.tray.setContextMenu(this.buildMenu());
+    if (this.tray) this.updateTray();
+    if (this.panel && !this.panel.isDestroyed()) this.panel.webContents.send('usage:state', this.panelState());
   }
 
   buildMenu() {
@@ -374,9 +402,79 @@ export class QuotaBarApp {
   // MARK: actions
 
   selectMainSource(id) {
-    this.config.mainSource = id;
-    saveConfig(this.config);
+    const updated = { ...this.config, mainSource: id };
+    if (!this.demoMode && !saveConfig(updated)) throw new Error('Could not save tray selection.');
+    this.config = updated;
+    this.lastAlertReading = null;
     this.rebuild('main-source');
+  }
+
+  panelState() {
+    const enabled = this.demoMode ? this.sections.map(s => s.id) : this.enabledIds();
+    const providers = enabled.map(id => this.readings.get(id) ?? { id, name: id, gauges: [], status: 'Waiting', lastSuccess: null });
+    const now = Date.now();
+    const staleAfter = normalizedPollMinutes(this.config.pollMinutes) * 120000;
+    return {
+      revision: ++this.stateVersion,
+      providers: providers.map(p => ({ ...p, stale: p.status !== 'Connected' || paused(this.preferences, now) || now - p.lastSuccess > staleAfter })),
+      pinned: this.config.mainSource ?? (this.demoMode ? 'codex' : 'zai'), preferences: this.preferences,
+      pollMinutes: normalizedPollMinutes(this.config.pollMinutes), refreshing: this.refreshGate.running, demo: this.demoMode, login: isLoginEnabled(app),
+    };
+  }
+
+  openPanel() {
+    if (this.panel && !this.panel.isDestroyed()) { this.panel.close(); return; }
+    this.panel = openUsagePanel({ tray: this.tray, getState: () => this.panelState(), command: command => this.panelCommand(command) });
+    this.panel.on('closed', () => { this.panel = null; });
+    return this.panel;
+  }
+
+  async panelCommand(command) {
+    if (!command || typeof command !== 'object') throw new Error('Invalid command');
+    const { action, id } = command;
+    const provider = this.panelState().providers.find(p => p.id === id);
+    if (['pin', 'watch', 'refresh-provider'].includes(action) && !provider) throw new Error('Provider is not enabled');
+    if (action === 'refresh' || action === 'refresh-provider') {
+      this.refreshNow(action === 'refresh' ? null : id);
+    } else if (action === 'pin') {
+      this.selectMainSource(id);
+    } else if (action === 'watch') {
+      if (!provider.gauges.some(g => g.id === command.gauge)) throw new Error('Unknown quota');
+      const preferences = validatePreferences({ ...this.preferences, watched: { ...this.preferences.watched, [id]: command.gauge } });
+      if (!this.demoMode) writeWindowsFile('windows-preferences.json', preferences);
+      this.preferences = preferences;
+      this.selectMainSource(id);
+    } else if (action === 'preferences') {
+      const patch = command.patch;
+      if (!patch || typeof patch !== 'object' || Object.keys(patch).some(key => !['lowAlert', 'recoveryAlert', 'threshold', 'manual'].includes(key))) throw new Error('Invalid preferences');
+      const preferences = validatePreferences({ ...this.preferences, ...patch });
+      if (!this.demoMode) writeWindowsFile('windows-preferences.json', preferences);
+      this.preferences = preferences;
+      this.lastAlertReading = null;
+    } else if (action === 'pause') {
+      if (!['hour', 'until-resume', 'resume'].includes(command.mode)) throw new Error('Invalid pause');
+      const preferences = { ...this.preferences, pauseUntil: command.mode === 'hour' ? Date.now() + 3600000 : command.mode === 'until-resume' ? -1 : 0 };
+      if (!this.demoMode) writeWindowsFile('windows-preferences.json', preferences);
+      this.preferences = preferences;
+    } else if (action === 'poll') {
+      if (![1, 2, 5, 10, 15, 30, 60].includes(command.minutes)) throw new Error('Invalid refresh interval');
+      const updated = { ...this.config, pollMinutes: command.minutes };
+      if (!this.demoMode && !saveConfig(updated)) throw new Error('Could not save update frequency');
+      this.config = updated;
+    } else if (action === 'login') {
+      if (typeof command.enabled !== 'boolean') throw new Error('Invalid login preference');
+      if (this.demoMode) throw new Error('Start at login is unavailable in demo mode.');
+      setLoginEnabled(app, command.enabled);
+    } else if (action === 'settings') {
+      if (this.demoMode) throw new Error('Credential settings are unavailable in demo mode.');
+      this.panel?.close();
+      this.openSettings();
+    } else if (action === 'discover') {
+      if (!this.demoMode) await this.discoverSources();
+    } else throw new Error('Unknown action');
+    this.schedulePoll();
+    this.rebuild('panel');
+    return this.panelState();
   }
 
   copyRaw() {

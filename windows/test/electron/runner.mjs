@@ -59,7 +59,7 @@ async function main() {
     await check('demo starts a native tray and menu without external requests', async () => {
       controller.start();
       assert.equal(controller.tray.isDestroyed(), false);
-      assert.deepEqual(controller.sections.map((s) => s.id), ['zai', 'github']);
+      assert.deepEqual(controller.sections.map((s) => s.id), ['zai', 'github', 'codex', 'claude']);
       assert.equal(fs.existsSync(cacheFileURL()), false, 'Demo must not overwrite real cache');
       const menu = controller.buildMenu();
       assert.ok(menu.items.find((item) => item.label === 'Refresh Now'));
@@ -73,6 +73,7 @@ async function main() {
       const originalTooltip = controller.tray.setToolTip.bind(controller.tray);
       controller.tray.setImage = (value) => { icon = value; originalImage(value); };
       controller.tray.setToolTip = (value) => { tooltip = value; originalTooltip(value); };
+      controller.imageKey = null;
       controller.applyGlyph(controller.demoGauges, 'Long provider title '.repeat(15));
       assert.ok(tooltip.length <= 128);
       assert.equal(tooltip.at(-1), '…');
@@ -84,8 +85,84 @@ async function main() {
     await check('native menu switches active source and persists selection', () => {
       const item = controller.buildMenu().items.find((item) => item.type === 'checkbox' && item.label.includes('GitHub'));
       assert.ok(item);
+      controller.demoMode = false;
       item.click();
       assert.equal(loadConfig().mainSource, 'github');
+      controller.demoMode = true;
+    });
+
+    let usage;
+    const ui = code => usage.webContents.executeJavaScript(code);
+    const baseMetrics = app.getAppMetrics();
+    await check('usage panel loads local logos and exposes only sanitized provider state', async () => {
+      usage = controller.openPanel();
+      await until(() => ui("!!document.querySelector('[data-provider=codex]')"));
+      assert.equal(await ui('typeof require'), 'undefined');
+      assert.equal(await ui("document.body.textContent.includes('REDACTED')"), false);
+      assert.equal(await ui("document.querySelector('meta[http-equiv=Content-Security-Policy]').content.includes(\"connect-src 'none'\")"), true);
+      await ui('Promise.all([...document.images].map(image => image.decode()))');
+      assert.equal(await ui("[...document.images].every(image => image.src.startsWith('file:'))"), true);
+    });
+    await check('inline expansion keeps focus and collapsed controls inaccessible', async () => {
+      await ui("document.querySelector('[data-provider=claude]').click()");
+      assert.equal(await ui("document.querySelector('[data-provider=claude]').getAttribute('aria-expanded')"), 'true');
+      assert.equal(await ui("document.querySelector('[data-reveal=claude]').inert"), false);
+      await ui("document.querySelector('[data-provider=claude]').click()");
+      assert.equal(await ui("document.querySelector('[data-reveal=claude]').inert"), true);
+      assert.equal(await ui('document.activeElement.dataset.provider'), 'claude');
+    });
+    await check('usage commands reject unrelated renderers', async () => {
+      const other = new BrowserWindow({ show: false, webPreferences: { preload: fileURLToPath(new URL('../../src/usagepreload.cjs', import.meta.url)), sandbox: true, contextIsolation: true } });
+      try {
+        await other.loadURL('about:blank');
+        await assert.rejects(other.webContents.executeJavaScript("window.usage.command({action:'pause',mode:'until-resume'})"), /Unauthorized window/);
+        assert.equal(controller.preferences.pauseUntil, 0);
+      } finally { other.destroy(); }
+    });
+    await check('pin and quota selection update both the dial and controller', async () => {
+      await ui("document.querySelector('[data-action=pin][data-id=claude]').click()");
+      await until(() => controller.config.mainSource === 'claude');
+      await ui("document.querySelector('[data-provider=claude]').click(); document.querySelector('[data-action=watch][data-id=claude][data-gauge=claude-weekly]').click()");
+      await until(() => controller.preferences.watched.claude === 'claude-weekly');
+      await until(() => ui("document.querySelector('.qb-dial-number').textContent.includes('88%')"));
+      await ui("document.querySelector('[data-reveal=claude] [data-reset]').click()");
+      assert.match(await ui("document.getElementById('qb-message').textContent"), /^Reset: /);
+    });
+    await check('panel preferences and pause/resume operate through validated IPC', async () => {
+      await ui("document.querySelector('footer [data-action=settings]').click(); document.querySelector('[data-preference=lowAlert]').click()");
+      await until(() => controller.preferences.lowAlert);
+      await ui("const select=document.querySelector('[data-setting=pause]'); select.value='until-resume'; select.dispatchEvent(new Event('change',{bubbles:true}))");
+      await until(() => controller.preferences.pauseUntil === -1);
+      await ui("document.querySelector('[data-action=resume]').click()");
+      await until(() => controller.preferences.pauseUntil === 0);
+      assert.equal((await ui("window.usage.command({action:'preferences',patch:{threshold:999}})")).error, 'Invalid alert threshold');
+      assert.equal((await ui("window.usage.command({action:'watch',id:'claude',gauge:'missing'})")).error, 'Unknown quota');
+      assert.equal(fs.existsSync(path.join(home, '.quotabar/windows-preferences.json')), false, 'Demo must not persist preferences');
+    });
+    await check('usage panel fits small displays and produces release screenshots', async () => {
+      await controller.panelCommand({ action: 'pin', id: 'codex' });
+      await ui("document.querySelector('[data-action=back]').click()");
+      await until(() => ui("document.querySelector('.qb-hero').dataset.provider === 'codex'"));
+      usage.setSize(320, 600);
+      assert.equal(await ui('document.documentElement.scrollWidth > innerWidth'), false);
+      usage.setSize(416, 660);
+      await ui('Promise.all([...document.images].map(image => image.decode()))');
+      if (process.env.QUOTABAR_SCREENSHOTS) {
+        await ui('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        fs.mkdirSync(process.env.QUOTABAR_SCREENSHOTS, { recursive: true });
+        fs.writeFileSync(path.join(process.env.QUOTABAR_SCREENSHOTS, 'screenshot-windows-instrument.png'), (await usage.webContents.capturePage()).toPNG());
+      }
+    });
+    await check('closing the panel releases its renderer and IPC handler', async () => {
+      const rendererPid = usage.webContents.getOSProcessId();
+      usage.close();
+      await until(() => usage.isDestroyed());
+      await until(() => !app.getAppMetrics().some(metric => metric.pid === rendererPid));
+      assert.equal(controller.panel, null);
+      assert.equal(app.getAppMetrics().filter(m => m.type === 'Tab').length, baseMetrics.filter(m => m.type === 'Tab').length);
+      usage = controller.openPanel();
+      await until(() => ui("!!document.querySelector('[data-provider=codex]')"));
+      usage.close();
     });
 
     await check('discovery saves new sources and refreshes without opening an alert or window', async () => {
@@ -369,17 +446,25 @@ async function main() {
       assert.equal(fresh.snapshot, null);
     });
 
-    await check('polling refreshes missing or stale data, but leaves fresh data alone', async () => {
+    await check('polling uses provider-independent freshness and respects pause/manual mode', async () => {
       const poller = new QuotaBarApp({ demoMode: false });
       let refreshes = 0;
       poller.refreshNow = async () => { refreshes++; };
       poller.config.pollMinutes = 5;
       poller.pollTick();
       assert.equal(refreshes, 1);
-      poller.snapshot = { fetchedAt: new Date() };
+      poller.snapshot = null;
+      poller.lastRefreshAt = Date.now();
       poller.pollTick();
       assert.equal(refreshes, 1);
-      poller.snapshot.fetchedAt = new Date(Date.now() - 301000);
+      poller.lastRefreshAt = Date.now() - 301000;
+      poller.pollTick();
+      assert.equal(refreshes, 2);
+      poller.preferences.pauseUntil = -1;
+      poller.pollTick();
+      assert.equal(refreshes, 2);
+      poller.preferences.pauseUntil = 0;
+      poller.preferences.manual = true;
       poller.pollTick();
       assert.equal(refreshes, 2);
     });
@@ -443,6 +528,30 @@ async function main() {
         assert.equal(loadConfig().sources.claude.token, 'REDACTED-rotated');
         assert.equal(loadConfig().sources.claude.refreshToken, 'REDACTED-rotated-refresh');
         assert.equal(controller.sections[0].gauges[0].pct, 40);
+      } finally { globalThis.fetch = originalFetch; }
+    });
+
+    await check('provider-specific refresh leaves unrelated providers untouched', async () => {
+      const fetched = [];
+      const original = controller.fetchProvider;
+      controller.config.sources.github = { enabled: true, token: '' };
+      controller.fetchProvider = async id => { fetched.push(id); return { id, title: id, gauges: [] }; };
+      try { await controller.refreshNow('github'); assert.deepEqual(fetched, ['github']); }
+      finally { controller.fetchProvider = original; }
+    });
+    await check('custom providers retain their endpoint when named after a built-in provider', async () => {
+      const originalFetch = globalThis.fetch;
+      controller.config.sources.custom = [{ id: 'OpenRouter', title: 'Custom service', url: 'https://custom.example.test/quota', token: '', usedPath: 'used', limitPath: 'limit' }];
+      globalThis.fetch = async url => {
+        assert.equal(String(url), 'https://custom.example.test/quota');
+        return new Response(JSON.stringify({ used: 30, limit: 100 }));
+      };
+      try {
+        assert.ok(controller.enabledIds().includes('custom:openrouter'));
+        await controller.refreshNow('custom:openrouter');
+        const custom = controller.sections.find(s => s.id === 'custom:openrouter');
+        assert.equal(custom.title, 'Custom service');
+        assert.equal(custom.gauges[0].pct, 30);
       } finally { globalThis.fetch = originalFetch; }
     });
   } catch (error) {

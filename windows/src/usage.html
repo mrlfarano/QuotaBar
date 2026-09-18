@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>QuotaBar</title>
+  <link rel="stylesheet" href="usage.css">
+  <script src="usage.js" defer></script>
+</head>
+<body>
+  <div id="qb-next" data-character="instrument">
+    <section class="qb-window" aria-label="QuotaBar usage">
+      <header class="qb-head"><div><div class="qb-title">QuotaBar<span class="qb-brand-dot">.</span></div><div class="qb-meta" id="qb-subtitle">Usage at a glance</div></div><div class="qb-header-actions"><span class="qb-meta" id="qb-fresh"></span><button type="button" data-action="close" aria-label="Close QuotaBar panel">×</button></div></header>
+      <div class="qb-body" id="qb-content"></div>
+      <footer class="qb-footer"><button type="button" data-action="refresh" id="qb-refresh">Refresh</button><button type="button" data-action="settings">Settings</button></footer>
+      <div class="qb-message" id="qb-message" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+</body>
+</html>

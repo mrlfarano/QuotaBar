@@ -6,6 +6,24 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ## [Unreleased]
 
+## [Windows 0.12.0] — 2026-09-18
+
+### Instrument usage panel
+
+- Left-click opens the approved colorful panel with locally bundled provider
+  logos, a pinned quota dial, expandable details, and smooth reversible motion.
+  Reduced-motion preferences disable transitions. Right-click keeps the native menu.
+- Pin providers, select the quota driving the tray, inspect exact reset dates,
+  retry connections, pause updates, or enable optional low/recovery alerts.
+- Preserve last-known readings with explicit freshness and connection states.
+  Windows preferences and sanitized cache are separate from the shared config.
+- Destroy the panel renderer on close, cache unchanged tray images, build the
+  native menu only when requested, and replace periodic wakeups with one scheduled
+  refresh. Refresh cadence no longer depends on Z.AI being enabled.
+- Validate panel IPC and sender ownership, retain existing provider/auth behavior,
+  and prevent custom provider names from selecting a built-in endpoint.
+- Package Windows 0.12.0 separately; macOS remains on its existing release.
+
 ### Windows verification and regression fixes
 
 - Fixed Codex Pro weekly quotas being labeled as five-hour windows when the

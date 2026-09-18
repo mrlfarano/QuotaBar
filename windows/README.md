@@ -3,8 +3,29 @@
 The Windows port of QuotaBar: the same sources, parsers, config format,
 color bands, and dual-ring glyph as the macOS menu-bar app, living in the
 Windows **system tray** (notification area) instead of the menu bar.
-Feature-parity with the macOS 0.11.0 app; released as a packaged,
-icon-branded `QuotaBar.exe` by CI.
+Windows **0.12.0** adds the Instrument usage panel. Download the portable
+archive from the [Windows release](https://github.com/mrlfarano/QuotaBar/releases/tag/windows-v0.12.0),
+extract the whole folder, and launch `QuotaBar.exe`.
+
+<img src="../docs/screenshot-windows-instrument.png" width="416" alt="QuotaBar Windows usage panel with a pinned provider dial, colorful quota bars, provider logos, and expandable details">
+
+Left-click the tray icon to open the panel. Click a provider for all quota
+windows, select which window drives its tray ring, or **Pin** another provider.
+Hover or focus reset times for the exact local date. **Settings** contains update
+cadence, manual mode, pause/resume, start at login, and optional alerts for the
+pinned quota. Alerts start disabled; recovery requires a new successful reading.
+**Manage connections** offers retry and access to credential settings.
+
+Details expand and retract smoothly; Windows reduced-motion preferences disable
+transitions. Logos are bundled locally. Closing the panel destroys its renderer;
+there are no background UI animation timers. Refreshes use one scheduled timeout
+and reuse tray images when quota values have not changed. See the
+[resource measurements](../docs/windows-performance.md) for measured limits.
+
+Right-click retains the native menu and advanced Settings window. Windows-only
+preferences and sanitized last-known readings live beside the shared config in
+`windows-preferences.json` and `windows-readings.json`. Unavailable or old readings
+are marked explicitly; a reset timestamp never invents replenished quota.
 
 - **Same logic** — every provider source (Z.AI, Claude, Codex, Copilot,
   Antigravity, OpenRouter, GitHub, custom dot-path sources), the pinned +
@@ -17,8 +38,8 @@ icon-branded `QuotaBar.exe` by CI.
   this on every push), and the snapshot cache
   (`~/.quotabar/last-snapshot.json`) is interchangeable with the macOS
   app's. `sources.zai` round-trips cleanly between the two apps.
-- **Same visuals** — the tray glyph is the same concentric dual ring
-  (outer = 5-hour quota, inner = weekly, band colors, filling clockwise
+- **Familiar tray glyph** — concentric dual rings
+  (outer = selected quota, inner = next quota, band colors, filling clockwise
   from 12 o'clock), with the colorblind-safe red center dot and the tray
   menu mirroring the macOS menu: section headers, block-bar gauge rows
   (padded to the longest current label), token counts, reset countdowns,
@@ -31,13 +52,13 @@ icon-branded `QuotaBar.exe` by CI.
 |-------|---------|
 | Menu-bar item shows glyph **+ text** (`41% · ↻43m ⚠︎`) | Tray icons are icon-only on Windows — the glyph's colors + red dot carry the band, and the escalation numbers (`↻` countdowns, `%`, ⚠︎), ring legend, and per-gauge "% left" live in the live-updating tooltip |
 | Attributed menu text (colored bars/percents inline) | Native menus can't color text; each gauge row carries a band-colored ring icon next to the mono block bar |
-| Inline settings in the dropdown + a small key editor | A separate Settings window with General, Sources, and Advanced tabs. Provider rows stay fixed when toggled; connection status stays in the tray menu. |
+| Inline settings in the dropdown + a small key editor | Usage panel with quick settings and connection status; separate General, Sources, and Advanced settings for credentials and configuration. |
 | `NSAlert` discovery results | Discovery refreshes silently; configuration lives in Settings |
 | z.ai token scan: `~/Library/Application Support` browser roots | Same byte-level scan across `%LOCALAPPDATA%` Chromium roots (Chrome, Canary, Chromium, Brave, Edge, Arc, Comet) + Firefox's `%APPDATA%` webappsstore.sqlite; Edge-protected stores are never read |
 | Antigravity process scan via `ps`/`lsof` | Same scan via `Get-CimInstance` / `Get-NetTCPConnection` (netstat fallback) |
 | LaunchAgent via `scripts/install-login.sh` | **Start at login** checkbox in Settings (registry-backed via `app.setLoginItemSettings`) |
 | config saved 0600 | `chmod 600` is a no-op on NTFS; the file sits in your profile folder — set ACLs yourself if you share the machine |
-| VoiceOver labels on gauge rows | Electron exposes no per-menu-item accessibility label API — an honest gap, no hack shipped |
+| VoiceOver labels on gauge rows | Custom panel exposes labeled meters, buttons, keyboard focus, and collapsed-state semantics. The native fallback menu still has Electron's per-item accessibility limitations. |
 
 ## Configure the app
 
