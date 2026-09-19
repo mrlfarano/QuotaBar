@@ -1,7 +1,7 @@
 {
   "name": "quotabar-windows",
   "productName": "QuotaBar",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Every AI quota you're burning through, in one tray glyph (Windows port of QuotaBar)",
   "main": "src/main.js",
   "type": "module",
@@ -20,7 +20,9 @@
     "test:windows": "npm run test:all && npm run package:win && npm run test:package",
     "test:live": "node scripts/live-check.js",
     "parse": "node src/cli.js",
-    "package:win": "node scripts/package-win.js"
+    "package:win": "node scripts/package-win.js",
+    "package:installer": "node scripts/package-installer.js",
+    "test:installer": "pwsh -NoProfile -File scripts/test-installer.ps1"
   },
   "devDependencies": {
     "electron": "^44.0.0",

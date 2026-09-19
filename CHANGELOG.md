@@ -6,6 +6,17 @@ All notable changes to QuotaBar are documented here. The format follows
 
 ## [Unreleased]
 
+## [Windows 0.12.1] — 2026-09-18
+
+- Added a per-user Windows installer with a Start menu shortcut, optional desktop
+  shortcut, in-place upgrades, and an Installed apps uninstall entry. No administrator
+  prompt is required. Existing QuotaBar settings and credentials are preserved.
+- Uninstall removes its own startup entry while preserving entries pointing to
+  other installations. Installer tests cover install, upgrade, shortcuts, payload
+  integrity, the installed executable, and uninstall cleanup.
+- CI builds the installer and portable ZIP together with SHA-256 checksums.
+  The application interface and runtime are unchanged from Windows 0.12.0.
+
 ## [Windows 0.12.0] — 2026-09-18
 
 ### Instrument usage panel

@@ -14,7 +14,7 @@ import { makeIco } from './make-ico.js';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const tag = (process.env.VERSION ?? '').trim().replace(/^v/, '');
+const tag = (process.env.VERSION ?? '').trim().replace(/^(windows-)?v/, '');
 const version = tag !== '' ? tag : pkg.version;
 
 const iconPath = makeIco();
