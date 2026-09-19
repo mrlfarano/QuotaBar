@@ -60,11 +60,12 @@ Status bar:  [◎ dual ring: outer = 5h, inner = weekly] ↻9h24m
 | **GitHub** (`github`) | API core rate limit | optional `GH_TOKEN` | official |
 | **Custom** (n many) | any JSON with used/limit (+reset) | whatever you configure | yours |
 
-A **Windows port** lives in [`windows/`](windows/README.md). Windows 0.12.0
-adds a colorful usage panel with provider logos, inline quota details, pinning,
-optional alerts, and pause controls. The panel releases its renderer when closed;
-right-click still opens the native tray menu. Provider parsers and the shared
-configuration remain compatible with macOS.
+A **Windows port** lives in [`windows/`](windows/README.md). Windows 0.12.1
+includes a per-user installer and the colorful usage panel introduced in 0.12.0,
+with provider logos, inline quota details, pinning, optional alerts, and pause
+controls. The panel releases its renderer when closed; right-click still opens
+the native tray menu. Provider parsers and the shared configuration remain
+compatible with macOS.
 
 The **Status Bar Source** picker decides whose numbers drive the rings;
 anything that fails falls back to the next healthy provider — error states
@@ -97,6 +98,8 @@ when Claude Code or Codex refreshes their own login, QuotaBar follows along.
 
 ## Install
 
+### macOS
+
 **Download** the latest [release](https://github.com/mrlfarano/QuotaBar/releases/latest)
 and drag `QuotaBar.app` anywhere convenient (launch-at-login installs it to
 `~/Applications`). The bundle is unsigned, so the first launch needs one of:
@@ -111,6 +114,15 @@ Then use **Install at Login** if you want it at every boot:
 scripts/install-login.sh      # builds, copies to ~/Applications, adds LaunchAgent
 scripts/uninstall-login.sh    # removes the agent
 ```
+
+### Windows
+
+Download **QuotaBar-0.12.1-Setup-x64.exe** from the
+[Windows 0.12.1 release](https://github.com/mrlfarano/QuotaBar/releases/tag/windows-v0.12.1)
+and run it. Setup installs per-user without an administrator prompt, adds a Start
+menu shortcut, offers a desktop shortcut, and supports in-place upgrades and
+uninstall through Windows Settings. The portable ZIP remains available. See the
+[Windows guide](windows/README.md) for details.
 
 **Build from source** (Xcode toolchain with Swift 5.9, no dependencies):
 

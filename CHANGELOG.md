@@ -10,7 +10,8 @@ All notable changes to QuotaBar are documented here. The format follows
 
 - Added a per-user Windows installer with a Start menu shortcut, optional desktop
   shortcut, in-place upgrades, and an Installed apps uninstall entry. No administrator
-  prompt is required. Existing QuotaBar settings and credentials are preserved.
+  prompt is required. `QuotaBar-0.12.1-Setup-x64.exe` is the recommended download;
+  the portable ZIP remains available. Existing settings and credentials are preserved.
 - Uninstall removes its own startup entry while preserving entries pointing to
   other installations. Installer tests cover install, upgrade, shortcuts, payload
   integrity, the installed executable, and uninstall cleanup.
