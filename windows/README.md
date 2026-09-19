@@ -170,7 +170,8 @@ exe (icon, `ProductName`, version — the `VERSION=vX.Y.Z` env overrides the
 package.json version, mirroring the macOS `make-app.sh`). Works from
 macOS/Linux too. Building the installer requires Windows and
 [Inno Setup 6](https://jrsoftware.org/isdl.php); set `ISCC_PATH` for a nonstandard
-compiler location. No new runtime dependency is added. CI uses its preinstalled
+compiler location. Installer verification scripts require PowerShell 7 (`pwsh`).
+No new runtime dependency is added. CI uses its preinstalled
 compiler, verifies isolated install/upgrade/uninstall behavior, then bundles the
 installer, portable ZIP, and `SHA256SUMS.txt`. Both binaries remain unsigned and
 Windows may show an unknown-publisher warning. Every `v*` tag attaches these assets

@@ -22,7 +22,7 @@
     "parse": "node src/cli.js",
     "package:win": "node scripts/package-win.js",
     "package:installer": "node scripts/package-installer.js",
-    "test:installer": "powershell -NoProfile -File scripts/test-installer.ps1"
+    "test:installer": "pwsh -NoProfile -File scripts/test-installer.ps1"
   },
   "devDependencies": {
     "electron": "^44.0.0",
