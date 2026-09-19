@@ -53,7 +53,7 @@ try {
     Assert-True ((Get-Content $sentinel) -eq 'preserve me') 'Upgrade removed a user file'
     Write-Output 'PASS: in-place version upgrade and user-file preservation'
 
-    New-Item -Path $startup -Force | Out-Null
+    if (-not (Test-Path $startup)) { New-Item -Path $startup | Out-Null }
     New-ItemProperty -Path $startup -Name $testId -Value ('"' + $installed + '"') -PropertyType String -Force | Out-Null
     Run-Setup (Join-Path $installDir 'unins000.exe') @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
     Assert-True (-not (Test-Path $installed)) 'Uninstall left executable'
