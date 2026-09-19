@@ -39,8 +39,11 @@ try {
     Assert-True ($link.TargetPath -eq $installed -and $link.Arguments -eq '--panel') 'Start menu shortcut incorrect'
     Assert-True (Test-Path $desktop) 'Optional desktop shortcut missing'
     $fixture = (Resolve-Path (Join-Path $PSScriptRoot '../../testdata/codex-pro-weekly.json')).Path
-    $output = & $installed --parse-codex $fixture
-    Assert-True ($LASTEXITCODE -eq 0 -and "$output" -match 'codex-weekly=10%') 'Installed application failed offline check'
+    $stdout = Join-Path $testRoot 'offline.stdout'
+    $stderr = Join-Path $testRoot 'offline.stderr'
+    $offline = Start-Process -FilePath $installed -ArgumentList @('--parse-codex', ('"' + $fixture + '"')) -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $output = Get-Content -LiteralPath $stdout -Raw
+    Assert-True ($offline.ExitCode -eq 0 -and $output -match 'codex-weekly=10%') "Installed application failed offline check (exit $($offline.ExitCode)): $output"
     Write-Output 'PASS: per-user install, payload, shortcuts, registration, installed executable'
 
     $sentinel = Join-Path $installDir 'user-file.txt'
