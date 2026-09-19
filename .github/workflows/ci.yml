@@ -106,3 +106,20 @@ jobs:
 
       - name: Packaged executable smoke tests
         run: npm run test:package
+
+      - name: Build installer
+        run: npm run package:installer
+
+      - name: Install, upgrade, and uninstall checks
+        run: npm run test:installer
+
+      - name: Bundle verified Windows release
+        run: ./scripts/bundle-release.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-bundle
+          path: |
+            windows/out/*-Setup-x64.exe
+            windows/out/*-win32-x64.zip
+            windows/out/SHA256SUMS.txt

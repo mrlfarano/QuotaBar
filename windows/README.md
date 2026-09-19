@@ -3,9 +3,15 @@
 The Windows port of QuotaBar: the same sources, parsers, config format,
 color bands, and dual-ring glyph as the macOS menu-bar app, living in the
 Windows **system tray** (notification area) instead of the menu bar.
-Windows **0.12.0** adds the Instrument usage panel. Download the portable
-archive from the [Windows release](https://github.com/mrlfarano/QuotaBar/releases/tag/windows-v0.12.0),
-extract the whole folder, and launch `QuotaBar.exe`.
+Windows **0.12.1** includes the Instrument usage panel and a Windows installer.
+Download **QuotaBar-0.12.1-Setup-x64.exe** from the
+[Windows release](https://github.com/mrlfarano/QuotaBar/releases/tag/windows-v0.12.1).
+Quit an older portable instance, run Setup, then launch QuotaBar from Start.
+Installation is per-user under `%LOCALAPPDATA%\Programs\QuotaBar`; no administrator
+prompt is required. Setup adds a Start menu shortcut and offers a desktop shortcut.
+Run a newer installer to upgrade in place. Windows Settings → Apps → Installed apps
+provides uninstall. Your `~/.quotabar` settings and credentials remain intact.
+The portable ZIP remains available; extract the entire folder before launching.
 
 <img src="../docs/screenshot-windows-instrument.png" width="416" alt="QuotaBar Windows usage panel with a pinned provider dial, colorful quota bars, provider logos, and expandable details">
 
@@ -153,6 +159,8 @@ compatibility.
 ```sh
 cd windows
 npm run package:win   # → out/QuotaBar-win32-x64/QuotaBar.exe
+npm run package:installer  # Windows + Inno Setup 6 → out/QuotaBar-<version>-Setup-x64.exe
+npm run test:installer     # isolated install/upgrade/uninstall lifecycle checks
 ```
 
 `scripts/package-win.js` regenerates `build/QuotaBar.ico` from the shared
@@ -160,11 +168,13 @@ npm run package:win   # → out/QuotaBar-win32-x64/QuotaBar.exe
 `@electron/packager` downloads the prebuilt win32 Electron and brands the
 exe (icon, `ProductName`, version — the `VERSION=vX.Y.Z` env overrides the
 package.json version, mirroring the macOS `make-app.sh`). Works from
-macOS/Linux too. The unpacked folder (or its zip) is the deliverable: copy
-`QuotaBar-win32-x64/` anywhere and run `QuotaBar.exe`. The binary is
-unsigned, so SmartScreen shows "more info → Run anyway" on first launch;
-every `v*` tag attaches the Windows zip to the GitHub release
-automatically.
+macOS/Linux too. Building the installer requires Windows and
+[Inno Setup 6](https://jrsoftware.org/isdl.php); set `ISCC_PATH` for a nonstandard
+compiler location. No new runtime dependency is added. CI uses its preinstalled
+compiler, verifies isolated install/upgrade/uninstall behavior, then bundles the
+installer, portable ZIP, and `SHA256SUMS.txt`. Both binaries remain unsigned and
+Windows may show an unknown-publisher warning. Every `v*` tag attaches these assets
+to its release; Windows-only releases use `windows-v*` tags and verified CI artifacts.
 
 ## Layout
 

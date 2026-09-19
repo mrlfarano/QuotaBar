@@ -63,9 +63,20 @@ jobs:
       - name: Packaged executable smoke tests
         run: npm run test:package
 
-      - name: Zip bundle
-        shell: pwsh
-        run: Compress-Archive -Path "out/QuotaBar-win32-x64/*" -DestinationPath "../QuotaBar-${env:GITHUB_REF_NAME}-win32-x64.zip"
+      - name: Build installer
+        run: npm run package:installer
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Install, upgrade, and uninstall checks
+        run: npm run test:installer
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Bundle verified Windows release
+        run: ./scripts/bundle-release.ps1
+        env:
+          VERSION: ${{ github.ref_name }}
 
       - name: Upload to release
         shell: pwsh
@@ -76,5 +87,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create "$env:GITHUB_REF_NAME" --title "QuotaBar $env:GITHUB_REF_NAME" --generate-notes
           }
-          gh release upload "$env:GITHUB_REF_NAME" "../QuotaBar-${env:GITHUB_REF_NAME}-win32-x64.zip" --clobber
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          gh release upload "$env:GITHUB_REF_NAME" "out/QuotaBar-$version-win32-x64.zip" "out/QuotaBar-$version-Setup-x64.exe" "out/SHA256SUMS.txt" --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
